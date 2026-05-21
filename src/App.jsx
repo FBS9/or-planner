@@ -791,30 +791,59 @@ export default function ORPlannerApp() {
                   </div>
                 ) : (
                   visibleCases.map((c, index) => (
-                    <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="grid gap-2 rounded-3xl bg-white p-3 ring-1 ring-slate-200 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
-                      <div className="flex items-center justify-between xl:hidden">
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">Case {index + 1}</span>
-                        <button onClick={() => deleteCase(c.id)} className="rounded-xl p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                    <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
+                      <div className="xl:hidden space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Case {index + 1}</span>
+                          <button onClick={() => deleteCase(c.id)} className="rounded-xl p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+
+                        <div className="grid grid-cols-[85px_1fr] gap-2">
+                          <input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="Time" className="mobile-input" />
+                          <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="mobile-input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
+                            {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
+                              <option value="">Add surgeon to roster first</option>
+                            ) : (
+                              getSurgeonNames(surgeonRosters, c.facility).map((surgeon) => <option key={surgeon}>{surgeon}</option>)
+                            )}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="mobile-input">{FACILITIES.map((f) => <option key={f}>{f}</option>)}</select>
+                          <input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Specialty" className="mobile-input" readOnly />
+                        </div>
+
+                        <input value={c.procedure} onChange={(e) => updateCase(c.id, { procedure: e.target.value })} placeholder="Procedure" className="mobile-input" />
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
+                          <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
+                          <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
+                        </div>
+
+                        <input value={c.notes} onChange={(e) => updateCase(c.id, { notes: e.target.value })} placeholder="Notes / add ons" className="mobile-input" />
                       </div>
-                      <Field label="Time"><input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="7:30" className="input" /></Field>
-                      <Field label="Facility"><select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="input">{FACILITIES.map((f) => <option key={f}>{f}</option>)}</select></Field>
-                      <Field label="Surgeon">
-                        <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
-                          {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
-                            <option value="">Add surgeon to roster first</option>
-                          ) : (
-                            getSurgeonNames(surgeonRosters, c.facility).map((surgeon) => <option key={surgeon}>{surgeon}</option>)
-                          )}
-                        </select>
-                      </Field>
-                      <Field label="Subspecialty">
-                        <input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Subspecialty" className="input" readOnly />
-                      </Field>
-                      <Field label="Procedure"><input value={c.procedure} onChange={(e) => updateCase(c.id, { procedure: e.target.value })} placeholder="Procedure" className="input" /></Field>
-                      <Check label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
-                      <Check label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
-                      <Check label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
-                      <Field label="Notes"><input value={c.notes} onChange={(e) => updateCase(c.id, { notes: e.target.value })} placeholder="Add ons / follow-up" className="input" /></Field>
+
+                      <div className="hidden xl:contents">
+                        <Field label="Time"><input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="7:30" className="input" /></Field>
+                        <Field label="Facility"><select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="input">{FACILITIES.map((f) => <option key={f}>{f}</option>)}</select></Field>
+                        <Field label="Surgeon">
+                          <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
+                            {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
+                              <option value="">Add surgeon to roster first</option>
+                            ) : (
+                              getSurgeonNames(surgeonRosters, c.facility).map((surgeon) => <option key={surgeon}>{surgeon}</option>)
+                            )}
+                          </select>
+                        </Field>
+                        <Field label="Subspecialty"><input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Subspecialty" className="input" readOnly /></Field>
+                        <Field label="Procedure"><input value={c.procedure} onChange={(e) => updateCase(c.id, { procedure: e.target.value })} placeholder="Procedure" className="input" /></Field>
+                        <Check label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
+                        <Check label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
+                        <Check label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
+                        <Field label="Notes"><input value={c.notes} onChange={(e) => updateCase(c.id, { notes: e.target.value })} placeholder="Add ons / follow-up" className="input" /></Field>
+                      </div>
                       <button onClick={() => deleteCase(c.id)} className="hidden rounded-xl p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 xl:block"><Trash2 className="h-4 w-4" /></button>
                     </motion.div>
                   ))
@@ -839,6 +868,8 @@ export default function ORPlannerApp() {
           box-sizing: border-box;
         }
         .compact-control:focus { box-shadow: 0 0 0 2px rgb(203 213 225); }
+        .mobile-input { width: 100%; height: 36px; border-radius: .85rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: 0 .65rem; font-size: .82rem; line-height: 36px; outline: none; }
+        .mobile-input:focus { box-shadow: 0 0 0 2px rgb(203 213 225); background: white; }
       `}</style>
     </div>
   );
@@ -881,6 +912,15 @@ function Check({ label, checked, onChange }) {
     <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 xl:justify-center xl:bg-transparent xl:border-0 xl:p-0">
       <span className="text-xs font-bold uppercase tracking-wide text-slate-500 xl:hidden">{label}</span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-6 w-6 accent-slate-900" />
+    </label>
+  );
+}
+
+function CompactCheck({ label, checked, onChange }) {
+  return (
+    <label className="flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-600">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-slate-900" />
+      {label}
     </label>
   );
 }
