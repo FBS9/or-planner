@@ -161,6 +161,7 @@ export default function ORPlannerApp() {
   const [cloudPassword, setCloudPassword] = useState("");
   const [cloudStatus, setCloudStatus] = useState(supabase ? "Cloud sync ready. Sign in to sync." : "Cloud sync not configured yet.");
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [showCloudPanel, setShowCloudPanel] = useState(false);
   const [autoCloudReady, setAutoCloudReady] = useState(false);
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
   const lastSavedSnapshotRef = useRef("");
@@ -565,40 +566,57 @@ export default function ORPlannerApp() {
         </motion.div>
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className="p-4">
-            <div className="grid gap-3 lg:grid-cols-[260px_1fr_auto] lg:items-center">
-              <div>
-                <h2 className="text-xl font-bold">Cloud Sync</h2>
-                <p className="text-sm text-slate-500">Sync this planner across iPhone, iPad, and desktop.</p>
+          <CardContent className={cloudSession && !showCloudPanel ? "px-4 py-2" : "p-4"}>
+            {cloudSession && !showCloudPanel ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Cloud Sync</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{cloudSyncActivity}</span>
+                  <span className="text-xs text-slate-500">{cloudSession.user.email}</span>
+                </div>
+                <button
+                  onClick={() => setShowCloudPanel(true)}
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Sync Settings ▼
+                </button>
               </div>
-              {cloudSession ? (
-                <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
-                  Signed in as <span className="font-semibold text-slate-900">{cloudSession.user.email}</span>
-                  <div className="mt-1 text-xs text-slate-500">{cloudStatus}</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-600">Auto sync: {cloudSyncActivity}</div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-[260px_1fr_auto] lg:items-center">
+                <div>
+                  <h2 className="text-xl font-bold">Cloud Sync</h2>
+                  <p className="text-sm text-slate-500">Sync this planner across iPhone, iPad, and desktop.</p>
                 </div>
-              ) : (
-                <div className="grid gap-2 md:grid-cols-2">
-                  <input value={cloudEmail} onChange={(e) => setCloudEmail(e.target.value)} placeholder="Email" className="input" type="email" />
-                  <input value={cloudPassword} onChange={(e) => setCloudPassword(e.target.value)} placeholder="Password" className="input" type="password" />
-                  <div className="md:col-span-2 text-xs text-slate-500">{cloudStatus}</div>
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 lg:justify-end">
                 {cloudSession ? (
-                  <>
-                    <Button onClick={pullFromCloud} disabled={cloudBusy} variant="secondary" className="rounded-2xl">Sync Now</Button>
-                    <Button onClick={saveToCloud} disabled={cloudBusy} className="rounded-2xl">Save Now</Button>
-                    <Button onClick={signOutOfCloud} disabled={cloudBusy} variant="outline" className="rounded-2xl">Sign Out</Button>
-                  </>
+                  <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
+                    Signed in as <span className="font-semibold text-slate-900">{cloudSession.user.email}</span>
+                    <div className="mt-1 text-xs text-slate-500">{cloudStatus}</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-600">Auto sync: {cloudSyncActivity}</div>
+                  </div>
                 ) : (
-                  <>
-                    <Button onClick={signInToCloud} disabled={cloudBusy || !supabase} className="rounded-2xl">Sign In</Button>
-                    <Button onClick={signUpForCloud} disabled={cloudBusy || !supabase} variant="secondary" className="rounded-2xl">Create Account</Button>
-                  </>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <input value={cloudEmail} onChange={(e) => setCloudEmail(e.target.value)} placeholder="Email" className="input" type="email" />
+                    <input value={cloudPassword} onChange={(e) => setCloudPassword(e.target.value)} placeholder="Password" className="input" type="password" />
+                    <div className="md:col-span-2 text-xs text-slate-500">{cloudStatus}</div>
+                  </div>
                 )}
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  {cloudSession ? (
+                    <>
+                      <Button onClick={pullFromCloud} disabled={cloudBusy} variant="secondary" className="rounded-2xl">Sync Now</Button>
+                      <Button onClick={saveToCloud} disabled={cloudBusy} className="rounded-2xl">Save Now</Button>
+                      <Button onClick={signOutOfCloud} disabled={cloudBusy} variant="outline" className="rounded-2xl">Sign Out</Button>
+                      <Button onClick={() => setShowCloudPanel(false)} disabled={cloudBusy} variant="outline" className="rounded-2xl">Collapse</Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button onClick={signInToCloud} disabled={cloudBusy || !supabase} className="rounded-2xl">Sign In</Button>
+                      <Button onClick={signUpForCloud} disabled={cloudBusy || !supabase} variant="secondary" className="rounded-2xl">Create Account</Button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -804,13 +822,13 @@ export default function ORPlannerApp() {
 
 function StatCard({ title, value, icon }) {
   return (
-    <Card className="rounded-3xl shadow-sm">
-      <CardContent className="flex items-center justify-between p-4">
+    <Card className="rounded-2xl shadow-sm">
+      <CardContent className="flex items-center justify-between px-3 py-2.5">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-          <div className="mt-1 text-3xl font-bold">{value}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+          <div className="mt-0.5 text-2xl font-bold leading-none">{value}</div>
         </div>
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">{icon}</div>
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-600 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
       </CardContent>
     </Card>
   );
