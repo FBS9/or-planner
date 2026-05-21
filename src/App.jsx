@@ -414,10 +414,10 @@ export default function ORPlannerApp() {
     const snapshotString = snapshotToString(snapshot);
     if (snapshotString === lastSavedSnapshotRef.current) return;
 
-    setCloudSyncActivity("Waiting to save...");
+    setCloudSyncActivity("Waiting 2s to save...");
     const timeout = window.setTimeout(() => {
       performCloudSave({ silent: true });
-    }, 1200);
+    }, 2000);
 
     return () => window.clearTimeout(timeout);
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
