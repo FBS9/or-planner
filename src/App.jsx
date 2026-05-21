@@ -142,6 +142,19 @@ function exportToCsv(casesByDate, surgeonRosters = {}) {
 }
 
 export default function ORPlannerApp() {
+  useEffect(() => {
+    let viewport = document.querySelector('meta[name="viewport"]');
+    if (!viewport) {
+      viewport = document.createElement("meta");
+      viewport.setAttribute("name", "viewport");
+      document.head.appendChild(viewport);
+    }
+    viewport.setAttribute(
+      "content",
+      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    );
+  }, []);
+
   const todayKey = toDateKey(new Date());
   const [plannerTitle, setPlannerTitle] = useState("OR Calendar Planner");
   const [selectedDate, setSelectedDate] = useState(todayKey);
