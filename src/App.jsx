@@ -169,6 +169,7 @@ export default function ORPlannerApp() {
   const [showRosterList, setShowRosterList] = useState(false);
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
   const [weekStartDay, setWeekStartDay] = useState("Sunday");
+  const [showWeekSettings, setShowWeekSettings] = useState(false);
   const [plannerLoaded, setPlannerLoaded] = useState(false);
   const [cloudSession, setCloudSession] = useState(null);
   const [cloudEmail, setCloudEmail] = useState("");
@@ -638,26 +639,41 @@ export default function ORPlannerApp() {
         </Card>
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className="px-4 py-3">
-            <div className="grid items-center gap-3 lg:grid-cols-[1fr_auto_minmax(260px,1fr)]">
-              <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                <Button onClick={() => setSelectedDate(toDateKey(addDays(weekStart, -7)))} variant="outline" className="h-10 rounded-2xl"><ChevronLeft className="h-4 w-4" /> Previous Week</Button>
-                <Button onClick={() => setSelectedDate(todayKey)} variant="secondary" className="h-10 rounded-2xl">Today</Button>
-                <Button onClick={() => setSelectedDate(toDateKey(addDays(weekStart, 7)))} variant="outline" className="h-10 rounded-2xl">Next Week <ChevronRight className="h-4 w-4" /></Button>
-              </div>
-
-              <div className="flex items-center justify-center gap-2">
-                <span className="whitespace-nowrap text-sm font-semibold text-slate-500">Jump to date</span>
-                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="compact-control w-[165px]" />
-              </div>
-
-              <div className="flex items-center justify-center gap-2 lg:justify-end">
-                <span className="whitespace-nowrap text-sm font-semibold text-slate-500">Week starts on</span>
-                <select value={weekStartDay} onChange={(e) => setWeekStartDay(e.target.value)} className="compact-control w-[155px] pr-8">
-                  {WEEK_START_OPTIONS.map((day) => <option key={day}>{day}</option>)}
-                </select>
-              </div>
+          <CardContent className="px-3 py-2 md:px-4 md:py-2.5">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 md:flex md:flex-wrap md:justify-between">
+              <Button onClick={() => setSelectedDate(toDateKey(addDays(weekStart, -7)))} variant="outline" className="h-10 rounded-2xl px-2 text-xs md:px-4 md:text-sm">
+                <ChevronLeft className="h-4 w-4" /> <span className="hidden sm:inline">Previous </span>Week
+              </Button>
+              <Button onClick={() => setSelectedDate(todayKey)} variant="secondary" className="h-10 rounded-2xl px-4 text-xs md:text-sm">Today</Button>
+              <Button onClick={() => setSelectedDate(toDateKey(addDays(weekStart, 7)))} variant="outline" className="h-10 rounded-2xl px-2 text-xs md:px-4 md:text-sm">
+                <span className="hidden sm:inline">Next </span>Week <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
+
+            <div className="mt-2 flex justify-center md:justify-end">
+              <button
+                onClick={() => setShowWeekSettings((prev) => !prev)}
+                className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+              >
+                Date / Week Settings {showWeekSettings ? "▲" : "▼"}
+              </button>
+            </div>
+
+            {showWeekSettings && (
+              <div className="mt-2 grid gap-2 rounded-2xl bg-slate-100 p-2 md:grid-cols-2 md:p-3">
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                  <span className="whitespace-nowrap text-sm font-semibold text-slate-500">Jump to date</span>
+                  <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="compact-control w-[160px]" />
+                </div>
+
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                  <span className="whitespace-nowrap text-sm font-semibold text-slate-500">Week starts on</span>
+                  <select value={weekStartDay} onChange={(e) => setWeekStartDay(e.target.value)} className="compact-control w-[150px] pr-8">
+                    {WEEK_START_OPTIONS.map((day) => <option key={day}>{day}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
