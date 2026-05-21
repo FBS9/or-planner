@@ -168,6 +168,7 @@ export default function ORPlannerApp() {
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const [newFacilityName, setNewFacilityName] = useState("");
+  const [showFacilitiesPanel, setShowFacilitiesPanel] = useState(false);
   const [surgeonRosters, setSurgeonRosters] = useState(() => ensureRosterShape(buildEmptyRosters(DEFAULT_FACILITIES), DEFAULT_FACILITIES));
   const [rosterFacility, setRosterFacility] = useState("");
   const [newSurgeonName, setNewSurgeonName] = useState("");
@@ -759,6 +760,56 @@ export default function ORPlannerApp() {
         </Card>
 
         <Card className="rounded-3xl shadow-sm">
+          <CardContent className={showFacilitiesPanel ? "p-4" : "px-4 py-2"}>
+            {!showFacilitiesPanel ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Facilities</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{facilities.length} saved</span>
+                </div>
+                <button onClick={() => setShowFacilitiesPanel(true)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">
+                  Manage Facilities ▼
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-xl font-bold">Facilities</h2>
+                    <p className="mt-1 text-sm text-slate-500">Add your own facilities. New users start blank; your saved setup stays with your account.</p>
+                  </div>
+                  <button onClick={() => setShowFacilitiesPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                  <input
+                    value={newFacilityName}
+                    onChange={(e) => setNewFacilityName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addFacility(); }}
+                    placeholder="Add facility"
+                    className="input"
+                  />
+                  <Button onClick={addFacility} className="rounded-2xl whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Add Facility</Button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {facilities.length === 0 ? (
+                    <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">No facilities saved yet.</div>
+                  ) : (
+                    facilities.map((facility) => (
+                      <span key={facility} className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                        {facility}
+                        <button onClick={() => removeFacility(facility)} className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${facility}`}>
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl shadow-sm">
           <CardContent className={showSurgeonRosterPanel ? "p-4" : "px-4 py-2"}>
             {!showSurgeonRosterPanel ? (
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -781,29 +832,7 @@ export default function ORPlannerApp() {
                   <h2 className="text-xl font-bold">Surgeon Rosters</h2>
                   <button onClick={() => setShowSurgeonRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Add your facilities first, then add doctors under each facility. New users start blank; your saved setup stays with your account.</p>
-                <div className="mt-3 flex gap-2">
-                  <input
-                    value={newFacilityName}
-                    onChange={(e) => setNewFacilityName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") addFacility(); }}
-                    placeholder="Add facility"
-                    className="input"
-                  />
-                  <Button onClick={addFacility} className="rounded-2xl whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Add</Button>
-                </div>
-                {facilities.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {facilities.map((facility) => (
-                      <span key={facility} className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                        {facility}
-                        <button onClick={() => removeFacility(facility)} className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${facility}`}>
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <p className="mt-1 text-sm text-slate-500">Add doctors under each saved facility. Surgery rows will then show those names in the surgeon dropdown for that facility.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
                 <div className="space-y-2">
