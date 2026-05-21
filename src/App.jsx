@@ -854,7 +854,7 @@ export default function ORPlannerApp() {
         </div>
       </div>
       <style>{`
-        .input { width: 100%; border-radius: 1rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: .75rem .8rem; font-size: .9rem; outline: none; }
+        .input { width: 100%; border-radius: 1rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: .75rem .8rem; font-size: 16px; outline: none; }
         .input:focus { box-shadow: 0 0 0 2px rgb(203 213 225); background: white; }
         .compact-control {
           height: 38px;
@@ -862,13 +862,13 @@ export default function ORPlannerApp() {
           border: 1px solid rgb(226 232 240);
           background: white;
           padding: 0 .8rem;
-          font-size: .9rem;
+          font-size: 16px;
           line-height: 38px;
           outline: none;
           box-sizing: border-box;
         }
         .compact-control:focus { box-shadow: 0 0 0 2px rgb(203 213 225); }
-        .mobile-input { width: 100%; height: 36px; border-radius: .85rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: 0 .65rem; font-size: .82rem; line-height: 36px; outline: none; }
+        .mobile-input { width: 100%; height: 38px; border-radius: .85rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: 0 .65rem; font-size: 16px; line-height: 38px; outline: none; }
         .mobile-input:focus { box-shadow: 0 0 0 2px rgb(203 213 225); background: white; }
       `}</style>
     </div>
