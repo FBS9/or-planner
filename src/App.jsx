@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
 import { Plus, Trash2, CalendarDays, Download, Upload, RotateCcw, CheckCircle2, ClipboardList, Search, ChevronLeft, ChevronRight } from "lucide-react";
@@ -161,6 +161,10 @@ export default function ORPlannerApp() {
   const [cloudPassword, setCloudPassword] = useState("");
   const [cloudStatus, setCloudStatus] = useState(supabase ? "Cloud sync ready. Sign in to sync." : "Cloud sync not configured yet.");
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [autoCloudReady, setAutoCloudReady] = useState(false);
+  const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
+  const lastSavedSnapshotRef = useRef("");
+  const isApplyingCloudRef = useRef(false);
 
   const orderedDays = useMemo(() => getOrderedDays(weekStartDay), [weekStartDay]);
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
@@ -261,44 +265,128 @@ export default function ORPlannerApp() {
     setCloudBusy(false);
     if (error) return setCloudStatus(error.message);
     setCloudSession(data.session || null);
-    setCloudStatus("Signed in. Use Pull from Cloud or Save to Cloud.");
+    setCloudStatus("Signed in. Pulling your latest cloud data...");
   };
 
   const signOutOfCloud = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
     setCloudSession(null);
+    setAutoCloudReady(false);
+    lastSavedSnapshotRef.current = "";
     setCloudStatus("Signed out of cloud sync.");
   };
 
-  const saveToCloud = async () => {
-    if (!supabase) return setCloudStatus("Cloud sync is missing Supabase environment variables.");
-    if (!cloudSession?.user?.id) return setCloudStatus("Sign in before saving to cloud.");
-    setCloudBusy(true);
+  const snapshotToString = (snapshot) => JSON.stringify(snapshot);
+
+  const performCloudSave = async ({ silent = false } = {}) => {
+    if (!supabase) {
+      if (!silent) setCloudStatus("Cloud sync is missing Supabase environment variables.");
+      return;
+    }
+    if (!cloudSession?.user?.id) {
+      if (!silent) setCloudStatus("Sign in before saving to cloud.");
+      return;
+    }
+
+    const snapshot = getPlannerSnapshot();
+    const snapshotString = snapshotToString(snapshot);
+    if (silent && snapshotString === lastSavedSnapshotRef.current) return;
+
+    if (!silent) setCloudBusy(true);
+    setCloudSyncActivity("Saving...");
     const { error } = await supabase.from("or_planner_sync").upsert({
       user_id: cloudSession.user.id,
-      planner_data: getPlannerSnapshot(),
+      planner_data: snapshot,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
-    setCloudBusy(false);
-    setCloudStatus(error ? error.message : `Saved to cloud at ${new Date().toLocaleTimeString()}.`);
+    if (!silent) setCloudBusy(false);
+
+    if (error) {
+      setCloudSyncActivity("Save failed");
+      setCloudStatus(error.message);
+      return;
+    }
+
+    lastSavedSnapshotRef.current = snapshotString;
+    const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
+    setCloudSyncActivity("Saved");
+    setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
   };
 
-  const pullFromCloud = async () => {
-    if (!supabase) return setCloudStatus("Cloud sync is missing Supabase environment variables.");
-    if (!cloudSession?.user?.id) return setCloudStatus("Sign in before pulling from cloud.");
-    setCloudBusy(true);
+  const performCloudPull = async ({ silent = false } = {}) => {
+    if (!supabase) {
+      if (!silent) setCloudStatus("Cloud sync is missing Supabase environment variables.");
+      return;
+    }
+    if (!cloudSession?.user?.id) {
+      if (!silent) setCloudStatus("Sign in before pulling from cloud.");
+      return;
+    }
+
+    if (!silent) setCloudBusy(true);
+    setCloudSyncActivity("Pulling...");
     const { data, error } = await supabase
       .from("or_planner_sync")
       .select("planner_data, updated_at")
       .eq("user_id", cloudSession.user.id)
       .maybeSingle();
-    setCloudBusy(false);
-    if (error) return setCloudStatus(error.message);
-    if (!data?.planner_data) return setCloudStatus("No cloud data found yet. Tap Save to Cloud from this device first.");
+    if (!silent) setCloudBusy(false);
+
+    if (error) {
+      setCloudSyncActivity("Pull failed");
+      setCloudStatus(error.message);
+      setAutoCloudReady(true);
+      return;
+    }
+
+    if (!data?.planner_data) {
+      setCloudSyncActivity("Ready");
+      setCloudStatus("No cloud data found yet. Your next change will auto-save to cloud.");
+      setAutoCloudReady(true);
+      return;
+    }
+
+    isApplyingCloudRef.current = true;
     applyPlannerSnapshot(data.planner_data);
-    setCloudStatus(`Pulled cloud data from ${data.updated_at ? new Date(data.updated_at).toLocaleString() : "cloud"}.`);
+    lastSavedSnapshotRef.current = snapshotToString(data.planner_data);
+    window.setTimeout(() => {
+      isApplyingCloudRef.current = false;
+      setAutoCloudReady(true);
+    }, 0);
+
+    setCloudSyncActivity("Synced");
+    setCloudStatus(`Auto-pulled cloud data from ${data.updated_at ? new Date(data.updated_at).toLocaleString() : "cloud"}.`);
   };
+
+  const saveToCloud = async () => performCloudSave({ silent: false });
+
+  const pullFromCloud = async () => performCloudPull({ silent: false });
+
+  useEffect(() => {
+    if (!plannerLoaded || !cloudSession?.user?.id) {
+      setAutoCloudReady(false);
+      return;
+    }
+    setAutoCloudReady(false);
+    performCloudPull({ silent: true });
+  }, [plannerLoaded, cloudSession?.user?.id]);
+
+  useEffect(() => {
+    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+    if (isApplyingCloudRef.current) return;
+
+    const snapshot = getPlannerSnapshot();
+    const snapshotString = snapshotToString(snapshot);
+    if (snapshotString === lastSavedSnapshotRef.current) return;
+
+    setCloudSyncActivity("Waiting to save...");
+    const timeout = window.setTimeout(() => {
+      performCloudSave({ silent: true });
+    }, 1200);
+
+    return () => window.clearTimeout(timeout);
+  }, [plannerTitle, selectedDate, casesByDate, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const weekCases = weekDates.flatMap((dateKey) => casesByDate[dateKey] || []);
@@ -487,6 +575,7 @@ export default function ORPlannerApp() {
                 <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
                   Signed in as <span className="font-semibold text-slate-900">{cloudSession.user.email}</span>
                   <div className="mt-1 text-xs text-slate-500">{cloudStatus}</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-600">Auto sync: {cloudSyncActivity}</div>
                 </div>
               ) : (
                 <div className="grid gap-2 md:grid-cols-2">
@@ -498,8 +587,8 @@ export default function ORPlannerApp() {
               <div className="flex flex-wrap gap-2 lg:justify-end">
                 {cloudSession ? (
                   <>
-                    <Button onClick={pullFromCloud} disabled={cloudBusy} variant="secondary" className="rounded-2xl">Pull from Cloud</Button>
-                    <Button onClick={saveToCloud} disabled={cloudBusy} className="rounded-2xl">Save to Cloud</Button>
+                    <Button onClick={pullFromCloud} disabled={cloudBusy} variant="secondary" className="rounded-2xl">Sync Now</Button>
+                    <Button onClick={saveToCloud} disabled={cloudBusy} className="rounded-2xl">Save Now</Button>
                     <Button onClick={signOutOfCloud} disabled={cloudBusy} variant="outline" className="rounded-2xl">Sign Out</Button>
                   </>
                 ) : (
