@@ -152,6 +152,7 @@ export default function ORPlannerApp() {
   const [rosterFacility, setRosterFacility] = useState(FACILITIES[0]);
   const [newSurgeonName, setNewSurgeonName] = useState("");
   const [newSurgeonSubspecialty, setNewSurgeonSubspecialty] = useState("");
+  const [showSurgeonRosterPanel, setShowSurgeonRosterPanel] = useState(false);
   const [showRosterList, setShowRosterList] = useState(false);
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
   const [weekStartDay, setWeekStartDay] = useState("Sunday");
@@ -390,10 +391,13 @@ export default function ORPlannerApp() {
   }, [plannerTitle, selectedDate, casesByDate, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
-  const weekCases = weekDates.flatMap((dateKey) => casesByDate[dateKey] || []);
+  const matchesSelectedFacility = (c) => selectedFacility === "All Facilities" || c.facility === selectedFacility;
+  const selectedDateFacilityCases = selectedDateCases.filter(matchesSelectedFacility);
+  const getCasesForDate = (dateKey) => (casesByDate[dateKey] || []).filter(matchesSelectedFacility);
+  const weekCases = weekDates.flatMap((dateKey) => getCasesForDate(dateKey));
   const yearCases = Object.entries(casesByDate)
     .filter(([dateKey]) => dateKey.startsWith(`${fromDateKey(selectedDate).getFullYear()}-`))
-    .flatMap(([, cases]) => cases);
+    .flatMap(([, cases]) => cases.filter(matchesSelectedFacility));
 
   const weeklyStats = useMemo(
     () => ({
@@ -416,12 +420,12 @@ export default function ORPlannerApp() {
 
   const dayStats = useMemo(
     () => ({
-      total: selectedDateCases.length,
-      growth: selectedDateCases.filter((c) => c.growth).length,
-      fastTracking: selectedDateCases.filter((c) => c.fastTracking).length,
-      reconciled: selectedDateCases.filter((c) => c.reconciled).length,
+      total: selectedDateFacilityCases.length,
+      growth: selectedDateFacilityCases.filter((c) => c.growth).length,
+      fastTracking: selectedDateFacilityCases.filter((c) => c.fastTracking).length,
+      reconciled: selectedDateFacilityCases.filter((c) => c.reconciled).length,
     }),
-    [selectedDateCases]
+    [selectedDateFacilityCases]
   );
 
   const visibleCases = useMemo(() => {
@@ -657,7 +661,7 @@ export default function ORPlannerApp() {
           <CardContent className="p-3 md:p-4">
             <div className="grid grid-cols-2 gap-2 md:grid-cols-7">
               {weekDates.map((dateKey, index) => {
-                const cases = casesByDate[dateKey] || [];
+                const cases = getCasesForDate(dateKey);
                 const active = selectedDate === dateKey;
                 return (
                   <button key={dateKey} onClick={() => setSelectedDate(dateKey)} className={`rounded-2xl p-3 text-left transition ${active ? "bg-slate-900 text-white shadow-md" : "bg-white ring-1 ring-slate-200 hover:bg-slate-100"}`}>
@@ -672,10 +676,28 @@ export default function ORPlannerApp() {
         </Card>
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className="p-4">
+          <CardContent className={showSurgeonRosterPanel ? "p-4" : "px-4 py-2"}>
+            {!showSurgeonRosterPanel ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Surgeon Rosters</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{Object.values(surgeonRosters).flat().length} surgeons saved</span>
+                </div>
+                <button
+                  onClick={() => setShowSurgeonRosterPanel(true)}
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Manage Surgeons ▼
+                </button>
+              </div>
+            ) : (
+              <>
             <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
               <div>
-                <h2 className="text-xl font-bold">Surgeon Rosters</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-xl font-bold">Surgeon Rosters</h2>
+                  <button onClick={() => setShowSurgeonRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                </div>
                 <p className="mt-1 text-sm text-slate-500">Add doctors to a facility once. Surgery rows will then show those names in the surgeon dropdown for that facility.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
@@ -713,6 +735,8 @@ export default function ORPlannerApp() {
                   </div>
                 )}
               </div>
+            )}
+              </>
             )}
           </CardContent>
         </Card>
