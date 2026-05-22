@@ -915,69 +915,58 @@ export default function ORPlannerApp() {
             </div>
             <input value={plannerTitle} onChange={(e) => setPlannerTitle(e.target.value)} className="mt-1 w-full bg-transparent text-3xl md:text-4xl font-bold outline-none" aria-label="Planner title" />
           </div>
-          <div className="space-y-2 md:flex md:flex-wrap md:items-center md:gap-2 md:space-y-0">
-            <div className="grid grid-cols-[1fr_auto] gap-2 md:contents">
-              <div className="inline-flex items-center gap-1 rounded-2xl bg-white p-1 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200">
-                {[["auto", "Auto"], ["mobile", "Mobile"], ["desktop", "Desktop"]].map(([value, label]) => (
-                  <button
-                    key={value}
-                    onClick={() => setLayoutMode(value)}
-                    className={`rounded-xl px-3 py-1.5 ${layoutMode === value ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <Button onClick={() => exportToCsv(casesByDate, surgeonRosters)} className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> CSV</Button>
+          <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 md:flex md:flex-wrap md:justify-end">
+            <select
+              value={layoutMode}
+              onChange={(e) => setLayoutMode(e.target.value)}
+              className="h-11 min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none focus:ring-2 focus:ring-slate-300 md:w-[140px]"
+              aria-label="Layout mode"
+            >
+              <option value="auto">Auto</option>
+              <option value="mobile">Mobile</option>
+              <option value="desktop">Desktop</option>
+            </select>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowMobileActions((prev) => !prev)}
+                className="h-11 rounded-2xl bg-white px-3 text-sm font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 md:px-4"
+              >
+                More ▾
+              </button>
+
+              {showMobileActions && (
+                <div className="absolute right-0 z-30 mt-2 grid w-48 gap-1 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-slate-200">
+                  <button onClick={() => { setShowMobileActions(false); exportToCsv(casesByDate, surgeonRosters); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="mr-2 h-4 w-4" /> CSV</button>
+                  <button onClick={() => { setShowMobileActions(false); exportJson(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="mr-2 h-4 w-4" /> Backup</button>
+                  <label className="flex cursor-pointer items-center rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    <Upload className="mr-2 h-4 w-4" /> Import
+                    <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
+                  </label>
+                  <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
+                </div>
+              )}
             </div>
 
             <button
-              onClick={() => setShowMobileActions((prev) => !prev)}
-              className="flex w-full items-center justify-between rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 md:hidden"
+              onClick={() => setShowCloudPanel((prev) => !prev)}
+              className="h-11 rounded-2xl bg-white px-3 text-xs font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 md:px-4"
             >
-              More Actions
-              <span>{showMobileActions ? "▲" : "▼"}</span>
+              {cloudSession ? (
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0">Cloud Sync</span>
+                  <span className="w-[92px] shrink-0 rounded-full bg-slate-100 px-2 py-1 text-center text-slate-600 whitespace-nowrap">{cloudSyncActivity}</span>
+                </span>
+              ) : (
+                <span>Cloud Sync</span>
+              )}
             </button>
-
-            {showMobileActions && (
-              <div className="grid gap-2 rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-200 md:hidden">
-                <button onClick={() => { setShowMobileActions(false); exportJson(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="mr-2 h-4 w-4" /> Backup</button>
-                <label className="flex cursor-pointer items-center rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  <Upload className="mr-2 h-4 w-4" /> Import
-                  <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
-                </label>
-                <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
-              </div>
-            )}
-
-            <div className="hidden flex-wrap gap-2 md:flex">
-              <Button onClick={exportJson} variant="secondary" className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> Backup</Button>
-              <label className="inline-flex cursor-pointer items-center rounded-2xl bg-white px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-slate-200">
-                <Upload className="mr-2 h-4 w-4" /> Import
-                <input type="file" accept="application/json" onChange={importJson} className="hidden" />
-              </label>
-              <Button onClick={resetSelectedDay} variant="outline" className="rounded-2xl shadow-sm"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</Button>
-            </div>
           </div>
         </motion.div>
 
-        <Card className="rounded-3xl shadow-sm">
-          <CardContent className={cloudSession && !showCloudPanel ? "px-4 py-2" : "p-4"}>
-            {cloudSession && !showCloudPanel ? (
-              <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-sm">
-                <div className="min-w-0 flex items-center gap-2 overflow-hidden">
-                  <span className="shrink-0 font-bold">Cloud Sync</span>
-                  <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 w-[132px] text-center whitespace-nowrap">{cloudSyncActivity}</span>
-                  <span className="min-w-0 truncate text-xs text-slate-500">{cloudSession.user.email}</span>
-                </div>
-                <button
-                  onClick={() => setShowCloudPanel(true)}
-                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
-                >
-                  Sync Settings ▼
-                </button>
-              </div>
-            ) : (
+        {showCloudPanel && (
+          <Card className="rounded-3xl shadow-sm">
+            <CardContent className="p-4">
               <div className="grid gap-3 lg:grid-cols-[260px_1fr_auto] lg:items-center">
                 <div>
                   <h2 className="text-xl font-bold">Cloud Sync</h2>
@@ -1012,9 +1001,9 @@ export default function ORPlannerApp() {
                   )}
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="rounded-3xl shadow-sm">
           <CardContent className="px-3 py-2 md:px-4 md:py-2.5">
