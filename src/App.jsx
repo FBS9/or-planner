@@ -1520,7 +1520,7 @@ export default function ORPlannerApp() {
                   </div>
                 ) : (
                   visibleCases.map((c, index) => (
-                    <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
+                    <motion.div key={c.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.12 }} className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
                       <div className="xl:hidden space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Case {index + 1}</span>
