@@ -238,6 +238,7 @@ export default function ORPlannerApp() {
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
+  const [deletingCaseIds, setDeletingCaseIds] = useState([]);
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
@@ -778,7 +779,11 @@ export default function ORPlannerApp() {
   };
 
   const deleteCase = (id) => {
-    setCasesByDate((prev) => ({ ...prev, [selectedDate]: (prev[selectedDate] || []).filter((c) => c.id !== id) }));
+    setDeletingCaseIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    window.setTimeout(() => {
+      setCasesByDate((prev) => ({ ...prev, [selectedDate]: (prev[selectedDate] || []).filter((c) => c.id !== id) }));
+      setDeletingCaseIds((prev) => prev.filter((caseId) => caseId !== id));
+    }, 220);
   };
 
   const resetSelectedDay = () => {
@@ -1500,7 +1505,12 @@ export default function ORPlannerApp() {
                   </div>
                 ) : (
                   visibleCases.map((c, index) => (
-                    <motion.div key={c.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.12 }} className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
+                    <motion.div
+                        key={c.id}
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : { opacity: 1, scale: 1 }}
+                        transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
+                        className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
                       <div className="xl:hidden space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Case {index + 1}</span>
