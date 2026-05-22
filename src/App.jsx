@@ -971,6 +971,7 @@ export default function ORPlannerApp() {
                 <select
                   value={caseTemplateSurgeon}
                   onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
                   className="input"
                   disabled={facilities.length === 0}
                 >
@@ -987,6 +988,7 @@ export default function ORPlannerApp() {
                 <input
                   value={caseTemplateProcedure}
                   onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
                   placeholder="Procedure"
                   className="input"
                 />
@@ -999,6 +1001,7 @@ export default function ORPlannerApp() {
                   min="1"
                   value={caseQuantity}
                   onChange={(e) => setCaseQuantity(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
                   placeholder="1"
                   className="input"
                 />
