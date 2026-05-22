@@ -95,6 +95,11 @@ const ensureRosterShape = (rosters = {}, facilities = []) => {
 
 const getSurgeonNames = (surgeonRosters, facility) => (surgeonRosters[facility] || []).map((s) => s.name);
 
+const isGrowthSpecialty = (specialty = "") => {
+  const normalized = specialty.trim().toLowerCase();
+  return normalized === "general surgeon" || normalized === "general surgery";
+};
+
 const getSubspecialty = (surgeonRosters, facility, surgeonName) =>
   (surgeonRosters[facility] || []).find((s) => s.name === surgeonName)?.subspecialty || "";
 
@@ -482,7 +487,13 @@ export default function ORPlannerApp() {
     });
   }, [selectedDateCases, selectedFacility, search, surgeonRosters]);
 
-  const isAutoGrowthSurgeon = (surgeonName) => growthSurgeons.includes(surgeonName);
+  const isAutoGrowthSurgeon = (surgeonName) => {
+    if (!surgeonName) return false;
+    if (growthSurgeons.includes(surgeonName)) return true;
+    return Object.values(surgeonRosters).some((roster) =>
+      (roster || []).some((surgeon) => surgeon.name === surgeonName && isGrowthSpecialty(surgeon.subspecialty))
+    );
+  };
 
   const addCase = () => {
     const facility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
@@ -540,15 +551,19 @@ export default function ORPlannerApp() {
 
   const addSurgeonToRoster = () => {
     const name = newSurgeonName.trim();
+    const specialty = newSurgeonSubspecialty.trim();
     if (!name) return;
     setSurgeonRosters((prev) => {
       const current = prev[rosterFacility] || [];
       if (current.some((s) => s.name.toLowerCase() === name.toLowerCase())) return prev;
       return {
         ...prev,
-        [rosterFacility]: [...current, { name, subspecialty: newSurgeonSubspecialty.trim() }].sort((a, b) => a.name.localeCompare(b.name)),
+        [rosterFacility]: [...current, { name, subspecialty: specialty }].sort((a, b) => a.name.localeCompare(b.name)),
       };
     });
+    if (isGrowthSpecialty(specialty)) {
+      setGrowthSurgeons((prev) => prev.includes(name) ? prev : [...prev, name]);
+    }
     setNewSurgeonName("");
     setNewSurgeonSubspecialty("");
   };
