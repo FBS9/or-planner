@@ -237,6 +237,7 @@ export default function ORPlannerApp() {
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
+  const [showMobileActions, setShowMobileActions] = useState(false);
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
@@ -913,25 +914,49 @@ export default function ORPlannerApp() {
             </div>
             <input value={plannerTitle} onChange={(e) => setPlannerTitle(e.target.value)} className="mt-1 w-full bg-transparent text-3xl md:text-4xl font-bold outline-none" aria-label="Planner title" />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-1 rounded-2xl bg-white p-1 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200">
-              {[["auto", "Auto"], ["mobile", "Mobile"], ["desktop", "Desktop"]].map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => setLayoutMode(value)}
-                  className={`rounded-xl px-3 py-1.5 ${layoutMode === value ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
-                >
-                  {label}
-                </button>
-              ))}
+          <div className="space-y-2 md:flex md:flex-wrap md:items-center md:gap-2 md:space-y-0">
+            <div className="grid grid-cols-[1fr_auto] gap-2 md:contents">
+              <div className="inline-flex items-center gap-1 rounded-2xl bg-white p-1 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200">
+                {[["auto", "Auto"], ["mobile", "Mobile"], ["desktop", "Desktop"]].map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setLayoutMode(value)}
+                    className={`rounded-xl px-3 py-1.5 ${layoutMode === value ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <Button onClick={() => exportToCsv(casesByDate, surgeonRosters)} className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> CSV</Button>
             </div>
-            <Button onClick={() => exportToCsv(casesByDate, surgeonRosters)} className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> CSV</Button>
-            <Button onClick={exportJson} variant="secondary" className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> Backup</Button>
-            <label className="inline-flex cursor-pointer items-center rounded-2xl bg-white px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-slate-200">
-              <Upload className="mr-2 h-4 w-4" /> Import
-              <input type="file" accept="application/json" onChange={importJson} className="hidden" />
-            </label>
-            <Button onClick={resetSelectedDay} variant="outline" className="rounded-2xl shadow-sm"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</Button>
+
+            <button
+              onClick={() => setShowMobileActions((prev) => !prev)}
+              className="flex w-full items-center justify-between rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 md:hidden"
+            >
+              More Actions
+              <span>{showMobileActions ? "▲" : "▼"}</span>
+            </button>
+
+            {showMobileActions && (
+              <div className="grid gap-2 rounded-2xl bg-white p-2 shadow-sm ring-1 ring-slate-200 md:hidden">
+                <button onClick={() => { setShowMobileActions(false); exportJson(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="mr-2 h-4 w-4" /> Backup</button>
+                <label className="flex cursor-pointer items-center rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <Upload className="mr-2 h-4 w-4" /> Import
+                  <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
+                </label>
+                <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
+              </div>
+            )}
+
+            <div className="hidden flex-wrap gap-2 md:flex">
+              <Button onClick={exportJson} variant="secondary" className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> Backup</Button>
+              <label className="inline-flex cursor-pointer items-center rounded-2xl bg-white px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-slate-200">
+                <Upload className="mr-2 h-4 w-4" /> Import
+                <input type="file" accept="application/json" onChange={importJson} className="hidden" />
+              </label>
+              <Button onClick={resetSelectedDay} variant="outline" className="rounded-2xl shadow-sm"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</Button>
+            </div>
           </div>
         </motion.div>
 
@@ -1267,12 +1292,12 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              <div className={`${addCasePanelClass} space-y-4`}>
-                <div className="space-y-2">
+              <div className={`${addCasePanelClass} space-y-3 md:space-y-4`}>
+                <div className="space-y-1.5 md:space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
-                  <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
+                  <div className="flex items-center rounded-xl border border-slate-200 bg-white px-3 md:rounded-2xl">
                     <Search className="h-4 w-4 text-slate-400" />
-                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Surgeon, procedure, note..." className="w-full bg-transparent px-2 py-3 text-sm outline-none" />
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Surgeon, procedure, note..." className="w-full bg-transparent px-2 py-2 text-sm outline-none md:py-3" />
                   </div>
                 </div>
 
@@ -1317,18 +1342,32 @@ export default function ORPlannerApp() {
                   <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">Time</label>
-                  <input
-                    value={caseTemplateTime}
-                    onChange={(e) => setCaseTemplateTime(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") procedureInputRef.current?.focus?.(); }}
-                    placeholder="Time, ex: 7:30"
-                    className="input"
-                  />
+                <div className="grid grid-cols-2 gap-2 md:block md:space-y-2">
+                  <div className="space-y-1.5 md:space-y-2">
+                    <label className="text-sm font-semibold text-slate-600">Time</label>
+                    <input
+                      value={caseTemplateTime}
+                      onChange={(e) => setCaseTemplateTime(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") procedureInputRef.current?.focus?.(); }}
+                      placeholder="7:30"
+                      className="input"
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:mt-4 md:space-y-2">
+                    <label className="text-sm font-semibold text-slate-600">Quantity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={caseQuantity}
+                      onChange={(e) => setCaseQuantity(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                      placeholder="1"
+                      className="input"
+                    />
+                  </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5 md:space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Procedure</label>
                   <input
                     ref={procedureInputRef}
@@ -1365,18 +1404,6 @@ export default function ORPlannerApp() {
                   </datalist>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={caseQuantity}
-                    onChange={(e) => setCaseQuantity(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                    placeholder="1"
-                    className="input"
-                  />
-                </div>
 
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-2xl bg-slate-50 p-2 ring-1 ring-slate-100 md:hidden">
                   <button
