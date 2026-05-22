@@ -204,9 +204,12 @@ export default function ORPlannerApp() {
   const [search, setSearch] = useState("");
   const [caseTemplateProcedure, setCaseTemplateProcedure] = useState("");
   const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
+  const [caseTemplateTime, setCaseTemplateTime] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
+  const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
+  const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
@@ -246,6 +249,72 @@ export default function ORPlannerApp() {
       .filter((item) => !item.reconciled)
       .map((item) => ({ ...item, displayDateKey: dateKey }))
   );
+
+  const fastTrackedWeekCases = weekDates.flatMap((dateKey) =>
+    (casesByDate[dateKey] || [])
+      .filter((item) => item.fastTracking)
+      .map((item) => ({ ...item, displayDateKey: dateKey }))
+  );
+
+  const fastTrackedReportGroups = weekDates.map((dateKey) => {
+    const dayCases = fastTrackedWeekCases.filter((item) => item.displayDateKey === dateKey);
+    const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
+    return {
+      dateKey,
+      facilities: facilitiesForDay.map((facility) => {
+        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility);
+        const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
+        return {
+          facility,
+          surgeons: surgeonsForFacility.map((surgeon) => ({
+            surgeon,
+            procedures: facilityCases
+              .filter((item) => (item.surgeon || "No Surgeon") === surgeon)
+              .map((item) => item.procedure || "No Procedure"),
+          })),
+        };
+      }),
+    };
+  }).filter((day) => day.facilities.length > 0);
+
+  const activeStatReportType = statReportType || (showFastTrackedReport ? "fastTracking" : null);
+  const statReportLabels = {
+    total: "Total Cases",
+    growth: "Growth Cases",
+    fastTracking: "Fast Tracked Cases",
+    reconciled: "Reconciled Cases",
+  };
+  const statReportCases = activeStatReportType ? weekDates.flatMap((dateKey) =>
+    (casesByDate[dateKey] || [])
+      .filter((item) => {
+        if (activeStatReportType === "total") return true;
+        if (activeStatReportType === "growth") return item.growth;
+        if (activeStatReportType === "fastTracking") return item.fastTracking;
+        if (activeStatReportType === "reconciled") return item.reconciled;
+        return false;
+      })
+      .map((item) => ({ ...item, displayDateKey: dateKey }))
+  ) : [];
+  const statReportGroups = weekDates.map((dateKey) => {
+    const dayCases = statReportCases.filter((item) => item.displayDateKey === dateKey);
+    const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
+    return {
+      dateKey,
+      facilities: facilitiesForDay.map((facility) => {
+        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility);
+        const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
+        return {
+          facility,
+          surgeons: surgeonsForFacility.map((surgeon) => ({
+            surgeon,
+            procedures: facilityCases
+              .filter((item) => (item.surgeon || "No Surgeon") === surgeon)
+              .map((item) => item.procedure || "No Procedure"),
+          })),
+        };
+      }),
+    };
+  }).filter((day) => day.facilities.length > 0);
   const isDesktopLayout = layoutMode === "desktop";
   const isMobileLayout = layoutMode === "mobile";
   const mobileOnlyClass = isDesktopLayout ? "hidden" : isMobileLayout ? "block" : "md:hidden";
@@ -529,19 +598,26 @@ export default function ORPlannerApp() {
 
   const visibleCases = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return selectedDateCases.filter((c) => {
-      const facilityMatch = selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
-      const searchFields = [
-        c.facility,
-        c.time,
-        c.surgeon,
-        getSubspecialty(surgeonRosters, c.facility, c.surgeon),
-        c.procedure,
-        c.notes,
-      ];
-      const searchMatch = !q || searchFields.some((field) => String(field || "").toLowerCase().includes(q));
-      return facilityMatch && searchMatch;
-    });
+    return selectedDateCases
+      .filter((c) => {
+        const facilityMatch = selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
+        const searchFields = [
+          c.facility,
+          c.time,
+          c.surgeon,
+          getSubspecialty(surgeonRosters, c.facility, c.surgeon),
+          c.procedure,
+          c.notes,
+        ];
+        const searchMatch = !q || searchFields.some((field) => String(field || "").toLowerCase().includes(q));
+        return facilityMatch && searchMatch;
+      })
+      .sort((a, b) => {
+        const aHasTime = Boolean((a.time || "").trim());
+        const bHasTime = Boolean((b.time || "").trim());
+        if (aHasTime !== bHasTime) return aHasTime ? 1 : -1;
+        return String(a.time || "").localeCompare(String(b.time || ""));
+      });
   }, [selectedDateCases, selectedFacility, search, surgeonRosters]);
 
   const isAutoGrowthSurgeon = (surgeonName) => {
@@ -638,13 +714,14 @@ export default function ORPlannerApp() {
 
     const casesToAdd = Array.from({ length: quantity }, () => ({
       ...blankCase(selectedDate, facility),
-      time: "",
+      time: caseTemplateTime.trim(),
       surgeon: selectedSurgeon,
       procedure: resolveCaseTemplateProcedure(),
       growth: isAutoGrowthSurgeon(selectedSurgeon),
     }));
     setCasesByDate((prev) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), ...casesToAdd] }));
     setCaseTemplateProcedure("");
+    setCaseTemplateTime("");
     setCaseQuantity(1);
   };
 
@@ -1092,10 +1169,10 @@ export default function ORPlannerApp() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <MiniStat label="Total" value={dayStats.total} />
-                <MiniStat label="Growth" value={dayStats.growth} />
-                <MiniStat label="FT" value={dayStats.fastTracking} />
-                <MiniStat label="Rec" value={dayStats.reconciled} />
+                <MiniStat label="Total" value={dayStats.total} onClick={() => setStatReportType("total")} />
+                <MiniStat label="Growth" value={dayStats.growth} onClick={() => setStatReportType("growth")} />
+                <MiniStat label="FT" value={dayStats.fastTracking} onClick={() => setStatReportType("fastTracking")} />
+                <MiniStat label="Rec" value={dayStats.reconciled} onClick={() => setStatReportType("reconciled")} />
               </div>
 
               <div className="space-y-2">
@@ -1134,7 +1211,19 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              <div className={`${addCasePanelClass} space-y-4`}><div className="space-y-2">
+              <div className={`${addCasePanelClass} space-y-4`}>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Time</label>
+                  <input
+                    value={caseTemplateTime}
+                    onChange={(e) => setCaseTemplateTime(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") selectFacilityAndMoveToSurgeon(selectedFacility); }}
+                    placeholder="Time, ex: 7:30"
+                    className="input"
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
                   <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
                     <Search className="h-4 w-4 text-slate-400" />
@@ -1245,7 +1334,52 @@ export default function ORPlannerApp() {
               </div>
 
               <div className="space-y-3">
-                {showUnreconciledOnly ? (
+                {activeStatReportType && (
+                <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
+                  <div className="mt-8 w-full max-w-2xl rounded-3xl bg-white p-4 shadow-xl ring-1 ring-slate-200">
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div>
+                        <h2 className="text-xl font-bold">{statReportLabels[activeStatReportType]}</h2>
+                        <p className="text-sm text-slate-500">Week of {formatLongDate(weekDates[0])}</p>
+                      </div>
+                      <button onClick={() => { setShowFastTrackedReport(false); setStatReportType(null); }} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Close</button>
+                    </div>
+
+                    {statReportGroups.length === 0 ? (
+                      <div className="mt-4 rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">No cases found for this selected report.</div>
+                    ) : (
+                      <div className="mt-4 space-y-5">
+                        {statReportGroups.map((day) => (
+                          <div key={day.dateKey}>
+                            <div className="mb-2 text-base font-bold text-slate-900">{fromDateKey(day.dateKey).toLocaleDateString(undefined, { weekday: "long" })}</div>
+                            <div className="space-y-3">
+                              {day.facilities.map((facilityGroup) => (
+                                <div key={facilityGroup.facility} className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
+                                  <div className="font-bold text-slate-800">{facilityGroup.facility}</div>
+                                  <div className="mt-2 space-y-2">
+                                    {facilityGroup.surgeons.map((surgeonGroup) => (
+                                      <div key={surgeonGroup.surgeon} className="pl-2">
+                                        <div className="font-semibold text-slate-700">- {surgeonGroup.surgeon}</div>
+                                        <div className="ml-5 mt-1 space-y-1 text-sm text-slate-600">
+                                          {surgeonGroup.procedures.map((procedure, index) => (
+                                            <div key={`${procedure}-${index}`}>- {procedure}</div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {showUnreconciledOnly ? (
                 unreconciledWeekCases.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-5 text-center text-sm text-slate-500">
                     No unreconciled cases for this selected week.
@@ -1373,11 +1507,25 @@ function StatCard({ title, value, icon }) {
   );
 }
 
-function MiniStat({ label, value }) {
-  return (
-    <div className="rounded-2xl bg-slate-100 p-3 text-center">
+function MiniStat({ label, value, onClick }) {
+  const content = (
+    <>
       <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
       <div className="text-2xl font-bold">{value}</div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button onClick={onClick} className="rounded-2xl bg-slate-100 p-3 text-center transition hover:bg-slate-200 active:scale-[0.99]">
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-slate-100 p-3 text-center">
+      {content}
     </div>
   );
 }
