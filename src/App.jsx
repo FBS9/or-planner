@@ -308,6 +308,9 @@ export default function ORPlannerApp() {
     };
   }).filter((day) => day.facilities.length > 0);
 
+  const selectedYear = fromDateKey(selectedDate).getFullYear();
+  const selectedWeekEnd = weekDates[weekDates.length - 1];
+
   const activeStatReportType = statReportType || (showFastTrackedReport ? "fastTracking" : null);
   const statReportLabels = {
     total: "Week Total Cases",
@@ -598,8 +601,6 @@ export default function ORPlannerApp() {
   const selectedDateFacilityCases = selectedDateCases.filter(matchesSelectedFacility);
   const getCasesForDate = (dateKey) => (casesByDate[dateKey] || []).filter(matchesSelectedFacility);
   const weekCases = weekDates.flatMap((dateKey) => getCasesForDate(dateKey));
-  const selectedYear = fromDateKey(selectedDate).getFullYear();
-  const selectedWeekEnd = weekDates[weekDates.length - 1];
   const yearCases = Object.entries(casesByDate)
     .filter(([dateKey]) => dateKey.startsWith(`${selectedYear}-`) && dateKey <= selectedWeekEnd)
     .flatMap(([, cases]) => cases.filter(matchesSelectedFacility));
