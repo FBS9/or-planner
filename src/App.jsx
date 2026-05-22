@@ -904,8 +904,23 @@ export default function ORPlannerApp() {
     URL.revokeObjectURL(url);
   };
 
+  const stabilizeMobileTap = (event) => {
+    const target = event.target;
+    if (!target || typeof window === "undefined") return;
+    const tag = target.tagName?.toLowerCase?.();
+    const type = target.getAttribute?.("type")?.toLowerCase?.();
+    const shouldStabilize = tag === "button" || type === "checkbox" || type === "radio";
+    if (!shouldStabilize) return;
+    const x = window.scrollX;
+    const y = window.scrollY;
+    window.setTimeout(() => {
+      target.blur?.();
+      window.scrollTo(x, y);
+    }, 0);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6">
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none" }} onPointerUpCapture={stabilizeMobileTap}>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
