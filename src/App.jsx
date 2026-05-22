@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEK_START_OPTIONS = DAYS;
+const ALL_FACILITIES = "All Facilities";
+const ALL_SURGEONS = "All Surgeons";
 
 const getOrderedDays = (weekStartDay) => {
   const startIndex = DAYS.indexOf(weekStartDay);
@@ -163,14 +165,14 @@ export default function ORPlannerApp() {
   const todayKey = toDateKey(new Date());
   const [plannerTitle, setPlannerTitle] = useState("OR Calendar Planner");
   const [selectedDate, setSelectedDate] = useState(todayKey);
-  const [selectedFacility, setSelectedFacility] = useState("All Facilities");
+  const [selectedFacility, setSelectedFacility] = useState(ALL_FACILITIES);
   const [search, setSearch] = useState("");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const [newFacilityName, setNewFacilityName] = useState("");
   const [showFacilitiesPanel, setShowFacilitiesPanel] = useState(false);
   const [surgeonRosters, setSurgeonRosters] = useState(() => ensureRosterShape(buildEmptyRosters(DEFAULT_FACILITIES), DEFAULT_FACILITIES));
-  const [rosterFacility, setRosterFacility] = useState("");
+  const [rosterFacility, setRosterFacility] = useState(ALL_SURGEONS);
   const [newSurgeonName, setNewSurgeonName] = useState("");
   const [newSurgeonSubspecialty, setNewSurgeonSubspecialty] = useState("");
   const [showSurgeonRosterPanel, setShowSurgeonRosterPanel] = useState(false);
@@ -212,7 +214,7 @@ export default function ORPlannerApp() {
     const nextFacilities = Array.isArray(snapshot.facilities) ? snapshot.facilities : Object.keys(snapshot.surgeonRosters || {});
     setFacilities(nextFacilities);
     setSurgeonRosters(ensureRosterShape(snapshot.surgeonRosters || buildEmptyRosters(nextFacilities), nextFacilities));
-    setRosterFacility((prev) => nextFacilities.includes(prev) ? prev : nextFacilities[0] || "");
+    setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
     setGrowthSurgeons(Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : []);
     setWeekStartDay(WEEK_START_OPTIONS.includes(snapshot.weekStartDay) ? snapshot.weekStartDay : "Sunday");
   };
@@ -227,7 +229,7 @@ export default function ORPlannerApp() {
         setCasesByDate(parsed.casesByDate || {});
         const parsedFacilities = getFacilitiesFromPlanner(parsed);
         setFacilities(parsedFacilities);
-        setRosterFacility((prev) => parsedFacilities.includes(prev) ? prev : parsedFacilities[0] || "");
+        setRosterFacility((prev) => prev === ALL_SURGEONS || parsedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
@@ -246,7 +248,7 @@ export default function ORPlannerApp() {
           setCasesByDate(migrated);
           const oldFacilities = getFacilitiesFromPlanner({ ...old, casesByDate: migrated });
           setFacilities(oldFacilities);
-          setRosterFacility((prev) => oldFacilities.includes(prev) ? prev : oldFacilities[0] || "");
+          setRosterFacility((prev) => prev === ALL_SURGEONS || oldFacilities.includes(prev) ? prev : ALL_SURGEONS);
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
           setGrowthSurgeons(Array.isArray(old.growthSurgeons) ? old.growthSurgeons : []);
           setWeekStartDay(migratedWeekStartDay);
@@ -423,7 +425,7 @@ export default function ORPlannerApp() {
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
-  const matchesSelectedFacility = (c) => selectedFacility === "All Facilities" || c.facility === selectedFacility;
+  const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
   const selectedDateFacilityCases = selectedDateCases.filter(matchesSelectedFacility);
   const getCasesForDate = (dateKey) => (casesByDate[dateKey] || []).filter(matchesSelectedFacility);
   const weekCases = weekDates.flatMap((dateKey) => getCasesForDate(dateKey));
@@ -480,7 +482,7 @@ export default function ORPlannerApp() {
   const isAutoGrowthSurgeon = (surgeonName) => growthSurgeons.includes(surgeonName);
 
   const addCase = () => {
-    const facility = selectedFacility === "All Facilities" ? facilities[0] || "" : selectedFacility;
+    const facility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
     const surgeons = getSurgeonNames(surgeonRosters, facility);
     const firstSurgeon = surgeons[0] || "";
     const newCase = { ...blankCase(selectedDate, facility), surgeon: firstSurgeon, growth: isAutoGrowthSurgeon(firstSurgeon) };
@@ -515,7 +517,7 @@ export default function ORPlannerApp() {
     if (!confirmed) return;
     setCasesByDate((prev) => ({ ...prev, [selectedDate]: [] }));
     setSearch("");
-    setSelectedFacility("All Facilities");
+    setSelectedFacility(ALL_FACILITIES);
   };
 
   const addSurgeonToRoster = () => {
@@ -547,6 +549,11 @@ export default function ORPlannerApp() {
 
   const syncActiveFacility = (facility) => {
     if (!facility) return;
+    if (facility === ALL_FACILITIES || facility === ALL_SURGEONS) {
+      setRosterFacility(ALL_SURGEONS);
+      setSelectedFacility(ALL_FACILITIES);
+      return;
+    }
     setRosterFacility(facility);
     setSelectedFacility(facility);
   };
@@ -577,15 +584,15 @@ export default function ORPlannerApp() {
       delete next[facility];
       return next;
     });
-    setSelectedFacility((prev) => prev === facility ? "All Facilities" : prev);
+    setSelectedFacility((prev) => prev === facility ? ALL_FACILITIES : prev);
     setRosterFacility((prev) => {
       if (prev !== facility) return prev;
       const remaining = facilities.filter((f) => f !== facility);
-      return remaining[0] || "";
+      return remaining.length ? remaining[0] : ALL_SURGEONS;
     });
   };
 
-  const selectedRoster = rosterFacility === "All Facilities"
+  const selectedRoster = rosterFacility === ALL_SURGEONS
     ? facilities.flatMap((facility) => (surgeonRosters[facility] || []).map((surgeon) => ({ ...surgeon, facility })))
     : surgeonRosters[rosterFacility] || [];
 
@@ -601,7 +608,7 @@ export default function ORPlannerApp() {
         setCasesByDate(parsed.casesByDate || {});
         const importedFacilities = getFacilitiesFromPlanner(parsed);
         setFacilities(importedFacilities);
-        setRosterFacility((prev) => importedFacilities.includes(prev) ? prev : importedFacilities[0] || "");
+        setRosterFacility((prev) => prev === ALL_SURGEONS || importedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
@@ -852,7 +859,7 @@ export default function ORPlannerApp() {
                       <option value="">Add a facility first</option>
                     ) : (
                       <>
-                        <option>All Facilities</option>
+                        <option value={ALL_SURGEONS}>{ALL_SURGEONS}</option>
                         {facilities.map((facility) => <option key={facility}>{facility}</option>)}
                       </>
                     )}
@@ -867,7 +874,7 @@ export default function ORPlannerApp() {
                 </div>
                 <input value={newSurgeonName} onChange={(e) => setNewSurgeonName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addSurgeonToRoster(); }} placeholder="Type surgeon name, ex: Dr. Smith" className="input" />
                 <input value={newSurgeonSubspecialty} onChange={(e) => setNewSurgeonSubspecialty(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addSurgeonToRoster(); }} placeholder="Subspecialty, ex: Gynecology" className="input" />
-                <Button onClick={addSurgeonToRoster} disabled={!rosterFacility} className="rounded-2xl"><Plus className="mr-2 h-4 w-4" /> Add Doctor</Button>
+                <Button onClick={addSurgeonToRoster} disabled={!rosterFacility || rosterFacility === ALL_SURGEONS} className="rounded-2xl"><Plus className="mr-2 h-4 w-4" /> Add Doctor</Button>
               </div>
             </div>
             {showRosterList && (
@@ -880,7 +887,7 @@ export default function ORPlannerApp() {
                       <div key={surgeon.name} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
                         <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
                         <span className="truncate">{surgeon.name}</span>
-                        {rosterFacility === "All Facilities" && surgeon.facility && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
+                        {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
                         {surgeon.subspecialty && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
                         <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="ml-auto rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
@@ -911,11 +918,8 @@ export default function ORPlannerApp() {
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">Facility</label>
-                <select value={selectedFacility} onChange={(e) => {
-                  setSelectedFacility(e.target.value);
-                  if (e.target.value !== "All Facilities") setRosterFacility(e.target.value);
-                }} className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300">
-                  <option>All Facilities</option>
+                <select value={selectedFacility} onChange={(e) => syncActiveFacility(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300">
+                  <option value={ALL_FACILITIES}>{ALL_FACILITIES}</option>
                   {facilities.map((facility) => <option key={facility}>{facility}</option>)}
                 </select>
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
