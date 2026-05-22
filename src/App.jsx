@@ -623,7 +623,6 @@ export default function ORPlannerApp() {
     }));
     setCasesByDate((prev) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), ...casesToAdd] }));
     setCaseTemplateProcedure("");
-    setCaseTemplateSurgeon("");
     setCaseQuantity(1);
   };
 
