@@ -735,6 +735,8 @@ export default function ORPlannerApp() {
   };
 
   const addCase = () => {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
     const facility = addSurgeryFacility;
     const quantity = Math.max(1, Number.parseInt(caseQuantity, 10) || 1);
     const selectedSurgeon = resolveCaseTemplateSurgeon();
@@ -755,9 +757,14 @@ export default function ORPlannerApp() {
     setCaseTemplateProcedure("");
     setCaseTemplateTime("");
     setCaseQuantity(1);
+    window.setTimeout(() => window.scrollTo(scrollX, scrollY), 0);
+    window.setTimeout(() => window.scrollTo(scrollX, scrollY), 80);
   };
 
   const updateCase = (id, patch) => {
+    const shouldPreserveScroll = "fastTracking" in patch || "reconciled" in patch || "growth" in patch;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
     setCasesByDate((prev) => ({
       ...prev,
       [selectedDate]: (prev[selectedDate] || []).map((c) => {
@@ -774,6 +781,10 @@ export default function ORPlannerApp() {
         return next;
       }),
     }));
+    if (shouldPreserveScroll) {
+      window.setTimeout(() => window.scrollTo(scrollX, scrollY), 0);
+      window.setTimeout(() => window.scrollTo(scrollX, scrollY), 80);
+    }
   };
 
   const deleteCase = (id) => {
