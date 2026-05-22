@@ -545,6 +545,12 @@ export default function ORPlannerApp() {
     setGrowthSurgeons((prev) => (prev.includes(surgeon) ? prev.filter((s) => s !== surgeon) : [...prev, surgeon]));
   };
 
+  const syncActiveFacility = (facility) => {
+    if (!facility) return;
+    setRosterFacility(facility);
+    setSelectedFacility(facility);
+  };
+
   const addFacility = () => {
     const name = newFacilityName.trim();
     if (!name) return;
@@ -553,7 +559,7 @@ export default function ORPlannerApp() {
       return [...prev, name].sort((a, b) => a.localeCompare(b));
     });
     setSurgeonRosters((prev) => ({ ...prev, [name]: prev[name] || [] }));
-    setRosterFacility(name);
+    syncActiveFacility(name);
     setNewFacilityName("");
   };
 
@@ -797,6 +803,9 @@ export default function ORPlannerApp() {
                     facilities.map((facility) => (
                       <span key={facility} className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
                         {facility}
+                        <button onClick={() => syncActiveFacility(facility)} className="rounded-lg px-1 py-0.5 text-left hover:bg-white" title={`Use ${facility} everywhere`}>
+                          {facility}
+                        </button>
                         <button onClick={() => removeFacility(facility)} className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${facility}`}>
                           <Trash2 className="h-3 w-3" />
                         </button>
@@ -836,7 +845,7 @@ export default function ORPlannerApp() {
               </div>
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
                 <div className="space-y-2">
-                  <select value={rosterFacility} onChange={(e) => setRosterFacility(e.target.value)} className="input" disabled={facilities.length === 0}>
+                  <select value={rosterFacility} onChange={(e) => syncActiveFacility(e.target.value)} className="input" disabled={facilities.length === 0}>
                     {facilities.length === 0 ? <option value="">Add a facility first</option> : facilities.map((facility) => <option key={facility}>{facility}</option>)}
                   </select>
                   <button
@@ -892,7 +901,10 @@ export default function ORPlannerApp() {
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">Facility</label>
-                <select value={selectedFacility} onChange={(e) => setSelectedFacility(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300">
+                <select value={selectedFacility} onChange={(e) => {
+                  setSelectedFacility(e.target.value);
+                  if (e.target.value !== "All Facilities") setRosterFacility(e.target.value);
+                }} className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300">
                   <option>All Facilities</option>
                   {facilities.map((facility) => <option key={facility}>{facility}</option>)}
                 </select>
