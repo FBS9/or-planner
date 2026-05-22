@@ -206,6 +206,7 @@ export default function ORPlannerApp() {
   const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
@@ -239,6 +240,14 @@ export default function ORPlannerApp() {
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
   const weekDates = useMemo(() => orderedDays.map((_, index) => toDateKey(addDays(weekStart, index))), [weekStart, orderedDays]);
   const selectedDayName = fromDateKey(selectedDate).toLocaleDateString(undefined, { weekday: "long" });
+  const isDesktopLayout = layoutMode === "desktop";
+  const isMobileLayout = layoutMode === "mobile";
+  const mobileOnlyClass = isDesktopLayout ? "hidden" : isMobileLayout ? "block" : "md:hidden";
+  const desktopOnlyClass = isDesktopLayout ? "block" : isMobileLayout ? "hidden" : "hidden md:block";
+
+  useEffect(() => {
+    localStorage.setItem("or-planner-layout-mode", layoutMode);
+  }, [layoutMode]);
 
   const getPlannerSnapshot = () => ({
     plannerTitle,
@@ -560,7 +569,7 @@ export default function ORPlannerApp() {
     Object.entries(casesByDate).forEach(([, cases]) => {
       (cases || []).forEach((item) => {
         const procedure = (item.procedure || "").trim();
-        if (!procedure || procedure.length < 4) return;
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b") return;
         const itemSpecialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon);
         if (normalizeProcedureSearch(itemSpecialty) === specialty) procedures.add(procedure);
       });
@@ -593,7 +602,7 @@ export default function ORPlannerApp() {
   const selectFacilityAndMoveToSurgeon = (facility) => {
     syncActiveFacility(facility);
     window.setTimeout(() => {
-      const isDesktop = window.matchMedia?.("(min-width: 768px)")?.matches;
+      const isDesktop = isDesktopLayout ? true : isMobileLayout ? false : window.matchMedia?.("(min-width: 768px)")?.matches;
       const target = isDesktop ? desktopSurgeonInputRef.current : mobileSurgeonInputRef.current;
       target?.focus?.();
       if (isDesktop && desktopSurgeonInputRef.current) desktopSurgeonInputRef.current.select?.();
@@ -785,7 +794,18 @@ export default function ORPlannerApp() {
             </div>
             <input value={plannerTitle} onChange={(e) => setPlannerTitle(e.target.value)} className="mt-1 w-full bg-transparent text-3xl md:text-4xl font-bold outline-none" aria-label="Planner title" />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded-2xl bg-white p-1 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200">
+              {[["auto", "Auto"], ["mobile", "Mobile"], ["desktop", "Desktop"]].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setLayoutMode(value)}
+                  className={`rounded-xl px-3 py-1.5 ${layoutMode === value ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <Button onClick={() => exportToCsv(casesByDate, surgeonRosters)} className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> CSV</Button>
             <Button onClick={exportJson} variant="secondary" className="rounded-2xl shadow-sm"><Download className="mr-2 h-4 w-4" /> Backup</Button>
             <label className="inline-flex cursor-pointer items-center rounded-2xl bg-white px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-slate-200">
@@ -1054,7 +1074,7 @@ export default function ORPlannerApp() {
                 </div>
                 <button
                   onClick={() => setShowMobileAddCase((prev) => !prev)}
-                  className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm md:hidden"
+                  className={`rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm ${isDesktopLayout ? "hidden" : isMobileLayout ? "inline-flex" : "md:hidden"}`}
                 >
                   {showMobileAddCase ? "Close" : "Add Case"}
                 </button>
@@ -1092,7 +1112,7 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              <div className={`${showMobileAddCase ? "block" : "hidden"} space-y-4 md:block`}>
+              <div className={`${isDesktopLayout ? "block" : isMobileLayout ? (showMobileAddCase ? "block" : "hidden") : `${showMobileAddCase ? "block" : "hidden"} md:block`} space-y-4`}> 
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
                   <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
@@ -1109,7 +1129,7 @@ export default function ORPlannerApp() {
                     value={caseTemplateSurgeon}
                     onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); selectSurgeonAndMoveToProcedure(); } }}
-                    className="input md:hidden"
+                    className={`input ${mobileOnlyClass}`}
                     disabled={facilities.length === 0}
                   >
                     <option value="">Select surgeon</option>
@@ -1131,7 +1151,7 @@ export default function ORPlannerApp() {
                     }}
                     list="add-surgery-surgeon-list"
                     placeholder="Search surgeon"
-                    className="input hidden md:block"
+                    className={`input ${desktopOnlyClass}`}
                     disabled={facilities.length === 0}
                   />
                   <datalist id="add-surgery-surgeon-list">
@@ -1150,13 +1170,13 @@ export default function ORPlannerApp() {
                     onChange={(e) => setCaseTemplateProcedure(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
                     placeholder="Type procedure"
-                    className="input md:hidden"
+                    className={`input ${mobileOnlyClass}`}
                   />
                   <select
                     value={procedureOptionsForSpecialty.includes(caseTemplateProcedure) ? caseTemplateProcedure : ""}
                     onChange={(e) => setCaseTemplateProcedure(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                    className="input md:hidden"
+                    className={`input ${mobileOnlyClass}`}
                   >
                     <option value="">{filteredProcedureOptions.length ? "Matching saved procedures" : procedureOptionsForSpecialty.length ? "No matching saved procedures" : "No saved procedures yet"}</option>
                     {filteredProcedureOptions.map((procedure) => (
@@ -1170,7 +1190,7 @@ export default function ORPlannerApp() {
                     onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
                     list="add-surgery-procedure-list"
                     placeholder={addSurgerySpecialty ? `Search ${addSurgerySpecialty} procedures` : "Procedure"}
-                    className="input hidden md:block"
+                    className={`input ${desktopOnlyClass}`}
                   />
                   <datalist id="add-surgery-procedure-list">
                     {filteredProcedureOptions.map((procedure) => (
