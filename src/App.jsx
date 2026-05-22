@@ -585,7 +585,9 @@ export default function ORPlannerApp() {
     });
   };
 
-  const selectedRoster = surgeonRosters[rosterFacility] || [];
+  const selectedRoster = rosterFacility === "All Facilities"
+    ? facilities.flatMap((facility) => (surgeonRosters[facility] || []).map((surgeon) => ({ ...surgeon, facility })))
+    : surgeonRosters[rosterFacility] || [];
 
   const importJson = (event) => {
     const file = event.target.files?.[0];
@@ -846,7 +848,14 @@ export default function ORPlannerApp() {
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
                 <div className="space-y-2">
                   <select value={rosterFacility} onChange={(e) => syncActiveFacility(e.target.value)} className="input" disabled={facilities.length === 0}>
-                    {facilities.length === 0 ? <option value="">Add a facility first</option> : facilities.map((facility) => <option key={facility}>{facility}</option>)}
+                    {facilities.length === 0 ? (
+                      <option value="">Add a facility first</option>
+                    ) : (
+                      <>
+                        <option>All Facilities</option>
+                        {facilities.map((facility) => <option key={facility}>{facility}</option>)}
+                      </>
+                    )}
                   </select>
                   <button
                     onClick={() => setShowRosterList((prev) => !prev)}
@@ -871,8 +880,9 @@ export default function ORPlannerApp() {
                       <div key={surgeon.name} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
                         <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
                         <span className="truncate">{surgeon.name}</span>
+                        {rosterFacility === "All Facilities" && surgeon.facility && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
                         {surgeon.subspecialty && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
-                        <button onClick={() => removeSurgeonFromRoster(rosterFacility, surgeon.name)} className="ml-auto rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="ml-auto rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     ))}
                   </div>
