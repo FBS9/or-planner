@@ -207,6 +207,7 @@ export default function ORPlannerApp() {
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
+  const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
   const [newFacilityName, setNewFacilityName] = useState("");
   const [showFacilitiesPanel, setShowFacilitiesPanel] = useState(false);
   const [surgeonRosters, setSurgeonRosters] = useState(() => ensureRosterShape(buildEmptyRosters(DEFAULT_FACILITIES), DEFAULT_FACILITIES));
@@ -242,7 +243,7 @@ export default function ORPlannerApp() {
     plannerTitle,
     selectedDate,
     casesByDate,
-    facilities,
+    facilities: sortedFacilities,
     surgeonRosters,
     growthSurgeons,
     weekStartDay,
@@ -252,7 +253,7 @@ export default function ORPlannerApp() {
     setPlannerTitle(snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner");
     setSelectedDate(snapshot.selectedDate || todayKey);
     setCasesByDate(snapshot.casesByDate || {});
-    const nextFacilities = Array.isArray(snapshot.facilities) ? snapshot.facilities : Object.keys(snapshot.surgeonRosters || {});
+    const nextFacilities = (Array.isArray(snapshot.facilities) ? snapshot.facilities : Object.keys(snapshot.surgeonRosters || {})).sort((a, b) => a.localeCompare(b));
     setFacilities(nextFacilities);
     setSurgeonRosters(ensureRosterShape(snapshot.surgeonRosters || buildEmptyRosters(nextFacilities), nextFacilities));
     setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
@@ -268,7 +269,7 @@ export default function ORPlannerApp() {
         setPlannerTitle(parsed.plannerTitle || parsed.weekTitle || "OR Calendar Planner");
         setSelectedDate(parsed.selectedDate || todayKey);
         setCasesByDate(parsed.casesByDate || {});
-        const parsedFacilities = getFacilitiesFromPlanner(parsed);
+        const parsedFacilities = getFacilitiesFromPlanner(parsed).sort((a, b) => a.localeCompare(b));
         setFacilities(parsedFacilities);
         setRosterFacility((prev) => prev === ALL_SURGEONS || parsedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
@@ -287,7 +288,7 @@ export default function ORPlannerApp() {
           });
           setPlannerTitle(old.weekTitle || "OR Calendar Planner");
           setCasesByDate(migrated);
-          const oldFacilities = getFacilitiesFromPlanner({ ...old, casesByDate: migrated });
+          const oldFacilities = getFacilitiesFromPlanner({ ...old, casesByDate: migrated }).sort((a, b) => a.localeCompare(b));
           setFacilities(oldFacilities);
           setRosterFacility((prev) => prev === ALL_SURGEONS || oldFacilities.includes(prev) ? prev : ALL_SURGEONS);
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
@@ -508,7 +509,7 @@ export default function ORPlannerApp() {
   const visibleCases = useMemo(() => {
     const q = search.trim().toLowerCase();
     return selectedDateCases.filter((c) => {
-      const facilityMatch = selectedFacility === "All Facilities" || c.facility === selectedFacility;
+      const facilityMatch = selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
       const searchFields = [
         c.facility,
         c.time,
@@ -530,7 +531,7 @@ export default function ORPlannerApp() {
     );
   };
 
-  const addSurgeryFacility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
+  const addSurgeryFacility = selectedFacility === ALL_FACILITIES ? sortedFacilities[0] || "" : selectedFacility;
   const addSurgerySurgeonOptions = useMemo(() => {
     const query = caseTemplateSurgeon.trim();
     return getSurgeonNames(surgeonRosters, addSurgeryFacility)
@@ -728,13 +729,13 @@ export default function ORPlannerApp() {
     setSelectedFacility((prev) => prev === facility ? ALL_FACILITIES : prev);
     setRosterFacility((prev) => {
       if (prev !== facility) return prev;
-      const remaining = facilities.filter((f) => f !== facility);
+      const remaining = sortedFacilities.filter((f) => f !== facility);
       return remaining.length ? remaining[0] : ALL_SURGEONS;
     });
   };
 
   const selectedRoster = rosterFacility === ALL_SURGEONS
-    ? facilities.flatMap((facility) => (surgeonRosters[facility] || []).map((surgeon) => ({ ...surgeon, facility })))
+    ? sortedFacilities.flatMap((facility) => (surgeonRosters[facility] || []).map((surgeon) => ({ ...surgeon, facility })))
     : surgeonRosters[rosterFacility] || [];
 
   const importJson = (event) => {
@@ -747,7 +748,7 @@ export default function ORPlannerApp() {
         setPlannerTitle(parsed.plannerTitle || parsed.weekTitle || "OR Calendar Planner");
         setSelectedDate(parsed.selectedDate || todayKey);
         setCasesByDate(parsed.casesByDate || {});
-        const importedFacilities = getFacilitiesFromPlanner(parsed);
+        const importedFacilities = getFacilitiesFromPlanner(parsed).sort((a, b) => a.localeCompare(b));
         setFacilities(importedFacilities);
         setRosterFacility((prev) => prev === ALL_SURGEONS || importedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
@@ -762,7 +763,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1001,7 +1002,7 @@ export default function ORPlannerApp() {
                     ) : (
                       <>
                         <option value={ALL_SURGEONS}>{ALL_SURGEONS}</option>
-                        {facilities.map((facility) => <option key={facility}>{facility}</option>)}
+                        {sortedFacilities.map((facility) => <option key={facility}>{facility}</option>)}
                       </>
                     )}
                   </select>
@@ -1077,7 +1078,7 @@ export default function ORPlannerApp() {
                   className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                 >
                   <option value={ALL_FACILITIES}>{ALL_FACILITIES}</option>
-                  {facilities.map((facility) => <option key={facility}>{facility}</option>)}
+                  {sortedFacilities.map((facility) => <option key={facility}>{facility}</option>)}
                 </select>
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
@@ -1219,7 +1220,7 @@ export default function ORPlannerApp() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-2">
-                          <select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="mobile-input">{facilities.map((f) => <option key={f}>{f}</option>)}</select>
+                          <select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="mobile-input">{sortedFacilities.map((f) => <option key={f}>{f}</option>)}</select>
                           <input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Specialty" className="mobile-input" readOnly />
                         </div>
 
@@ -1236,7 +1237,7 @@ export default function ORPlannerApp() {
 
                       <div className="hidden xl:contents">
                         <Field label="Time"><input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="7:30" className="input" /></Field>
-                        <Field label="Facility"><select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="input">{facilities.map((f) => <option key={f}>{f}</option>)}</select></Field>
+                        <Field label="Facility"><select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="input">{sortedFacilities.map((f) => <option key={f}>{f}</option>)}</select></Field>
                         <Field label="Surgeon">
                           <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
                             {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
