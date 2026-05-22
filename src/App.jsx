@@ -111,6 +111,20 @@ const surgeonSearchRank = (surgeonName = "", query = "") => {
   return 99;
 };
 
+const normalizeProcedureSearch = (value = "") => value.trim().toLowerCase();
+
+const getSurgeonSpecialty = (surgeonRosters, facility, surgeonName) => {
+  if (!surgeonName) return "";
+  const normalizedName = normalizeSurgeonSearch(surgeonName);
+  const facilityRoster = surgeonRosters[facility] || [];
+  const facilityMatch = facilityRoster.find((surgeon) => normalizeSurgeonSearch(surgeon.name) === normalizedName);
+  if (facilityMatch) return facilityMatch.subspecialty || "";
+  const allMatch = Object.values(surgeonRosters)
+    .flatMap((roster) => roster || [])
+    .find((surgeon) => normalizeSurgeonSearch(surgeon.name) === normalizedName);
+  return allMatch?.subspecialty || "";
+};
+
 const isGrowthSpecialty = (specialty = "") => {
   const normalized = specialty.trim().toLowerCase();
   return normalized === "general surgeon" || normalized === "general surgery";
@@ -215,6 +229,9 @@ export default function ORPlannerApp() {
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
   const lastSavedSnapshotRef = useRef("");
   const isApplyingCloudRef = useRef(false);
+  const procedureInputRef = useRef(null);
+  const mobileSurgeonInputRef = useRef(null);
+  const desktopSurgeonInputRef = useRef(null);
 
   const orderedDays = useMemo(() => getOrderedDays(weekStartDay), [weekStartDay]);
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
@@ -533,6 +550,60 @@ export default function ORPlannerApp() {
     return typed;
   };
 
+  const addSurgerySpecialty = getSurgeonSpecialty(surgeonRosters, addSurgeryFacility, resolveCaseTemplateSurgeon());
+  const procedureOptionsForSpecialty = useMemo(() => {
+    const specialty = normalizeProcedureSearch(addSurgerySpecialty);
+    if (!specialty) return [];
+    const procedures = new Set();
+    Object.entries(casesByDate).forEach(([, cases]) => {
+      (cases || []).forEach((item) => {
+        const procedure = (item.procedure || "").trim();
+        if (!procedure || procedure.length < 4) return;
+        const itemSpecialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon);
+        if (normalizeProcedureSearch(itemSpecialty) === specialty) procedures.add(procedure);
+      });
+    });
+    return Array.from(procedures).sort((a, b) => a.localeCompare(b));
+  }, [casesByDate, surgeonRosters, addSurgerySpecialty]);
+
+  const filteredProcedureOptions = useMemo(() => {
+    const query = normalizeProcedureSearch(caseTemplateProcedure);
+    return procedureOptionsForSpecialty
+      .filter((procedure) => !query || normalizeProcedureSearch(procedure).includes(query))
+      .sort((a, b) => {
+        const aName = normalizeProcedureSearch(a);
+        const bName = normalizeProcedureSearch(b);
+        const aStarts = query && aName.startsWith(query) ? 0 : 1;
+        const bStarts = query && bName.startsWith(query) ? 0 : 1;
+        return aStarts - bStarts || a.localeCompare(b);
+      });
+  }, [procedureOptionsForSpecialty, caseTemplateProcedure]);
+
+  const resolveCaseTemplateProcedure = () => {
+    const typed = caseTemplateProcedure.trim();
+    if (!typed) return "";
+    const exact = procedureOptionsForSpecialty.find((procedure) => normalizeProcedureSearch(procedure) === normalizeProcedureSearch(typed));
+    if (exact) return exact;
+    if (filteredProcedureOptions.length === 1) return filteredProcedureOptions[0];
+    return typed;
+  };
+
+  const selectFacilityAndMoveToSurgeon = (facility) => {
+    syncActiveFacility(facility);
+    window.setTimeout(() => {
+      const isDesktop = window.matchMedia?.("(min-width: 768px)")?.matches;
+      const target = isDesktop ? desktopSurgeonInputRef.current : mobileSurgeonInputRef.current;
+      target?.focus?.();
+      if (isDesktop && desktopSurgeonInputRef.current) desktopSurgeonInputRef.current.select?.();
+    }, 75);
+  };
+
+  const selectSurgeonAndMoveToProcedure = () => {
+    const resolvedSurgeon = resolveCaseTemplateSurgeon();
+    if (resolvedSurgeon) setCaseTemplateSurgeon(resolvedSurgeon);
+    window.setTimeout(() => procedureInputRef.current?.focus?.(), 0);
+  };
+
   const addCase = () => {
     const facility = addSurgeryFacility;
     const quantity = Math.max(1, Number.parseInt(caseQuantity, 10) || 1);
@@ -547,7 +618,7 @@ export default function ORPlannerApp() {
       ...blankCase(selectedDate, facility),
       time: "",
       surgeon: selectedSurgeon,
-      procedure: caseTemplateProcedure.trim(),
+      procedure: resolveCaseTemplateProcedure(),
       growth: isAutoGrowthSurgeon(selectedSurgeon),
     }));
     setCasesByDate((prev) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), ...casesToAdd] }));
@@ -989,7 +1060,23 @@ export default function ORPlannerApp() {
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">Facility</label>
-                <select value={selectedFacility} onChange={(e) => syncActiveFacility(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300">
+                <select
+                  value={selectedFacility}
+                  onChange={(e) => syncActiveFacility(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      selectFacilityAndMoveToSurgeon(e.currentTarget.value);
+                    }
+                  }}
+                  onKeyUp={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      selectFacilityAndMoveToSurgeon(e.currentTarget.value);
+                    }
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                >
                   <option value={ALL_FACILITIES}>{ALL_FACILITIES}</option>
                   {facilities.map((facility) => <option key={facility}>{facility}</option>)}
                 </select>
@@ -1007,9 +1094,11 @@ export default function ORPlannerApp() {
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">Surgeon</label>
                 <select
+                  id="add-surgery-surgeon-mobile"
+                  ref={mobileSurgeonInputRef}
                   value={caseTemplateSurgeon}
                   onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); selectSurgeonAndMoveToProcedure(); } }}
                   className="input md:hidden"
                   disabled={facilities.length === 0}
                 >
@@ -1020,9 +1109,16 @@ export default function ORPlannerApp() {
                 </select>
 
                 <input
+                  id="add-surgery-surgeon-desktop"
+                  ref={desktopSurgeonInputRef}
                   value={caseTemplateSurgeon}
                   onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      selectSurgeonAndMoveToProcedure();
+                    }
+                  }}
                   list="add-surgery-surgeon-list"
                   placeholder="Search surgeon"
                   className="input hidden md:block"
@@ -1039,12 +1135,38 @@ export default function ORPlannerApp() {
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">Procedure</label>
                 <input
+                  ref={procedureInputRef}
                   value={caseTemplateProcedure}
                   onChange={(e) => setCaseTemplateProcedure(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  placeholder="Procedure"
-                  className="input"
+                  placeholder="Type procedure"
+                  className="input md:hidden"
                 />
+                <select
+                  value={procedureOptionsForSpecialty.includes(caseTemplateProcedure) ? caseTemplateProcedure : ""}
+                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                  className="input md:hidden"
+                >
+                  <option value="">{filteredProcedureOptions.length ? "Matching saved procedures" : procedureOptionsForSpecialty.length ? "No matching saved procedures" : "No saved procedures yet"}</option>
+                  {filteredProcedureOptions.map((procedure) => (
+                    <option key={procedure} value={procedure}>{procedure}</option>
+                  ))}
+                </select>
+                <input
+                  ref={procedureInputRef}
+                  value={caseTemplateProcedure}
+                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                  list="add-surgery-procedure-list"
+                  placeholder={addSurgerySpecialty ? `Search ${addSurgerySpecialty} procedures` : "Procedure"}
+                  className="input hidden md:block"
+                />
+                <datalist id="add-surgery-procedure-list">
+                  {filteredProcedureOptions.map((procedure) => (
+                    <option key={procedure} value={procedure} />
+                  ))}
+                </datalist>
               </div>
 
               <div className="space-y-2">
