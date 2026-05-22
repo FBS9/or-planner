@@ -95,6 +95,22 @@ const ensureRosterShape = (rosters = {}, facilities = []) => {
 
 const getSurgeonNames = (surgeonRosters, facility) => (surgeonRosters[facility] || []).map((s) => s.name);
 
+const normalizeSurgeonSearch = (value = "") =>
+  value
+    .toLowerCase()
+    .replace(/^dr[.]? */, "")
+    .replace(/[^a-z0-9]/g, "");
+
+const surgeonSearchRank = (surgeonName = "", query = "") => {
+  const normalizedName = normalizeSurgeonSearch(surgeonName);
+  const normalizedQuery = normalizeSurgeonSearch(query);
+  if (!normalizedQuery) return 0;
+  if (normalizedName === normalizedQuery) return 0;
+  if (normalizedName.startsWith(normalizedQuery)) return 1;
+  if (normalizedName.includes(normalizedQuery)) return 2;
+  return 99;
+};
+
 const isGrowthSpecialty = (specialty = "") => {
   const normalized = specialty.trim().toLowerCase();
   return normalized === "general surgeon" || normalized === "general surgery";
@@ -437,8 +453,10 @@ export default function ORPlannerApp() {
   const selectedDateFacilityCases = selectedDateCases.filter(matchesSelectedFacility);
   const getCasesForDate = (dateKey) => (casesByDate[dateKey] || []).filter(matchesSelectedFacility);
   const weekCases = weekDates.flatMap((dateKey) => getCasesForDate(dateKey));
+  const selectedYear = fromDateKey(selectedDate).getFullYear();
+  const selectedWeekEnd = weekDates[weekDates.length - 1];
   const yearCases = Object.entries(casesByDate)
-    .filter(([dateKey]) => dateKey.startsWith(`${fromDateKey(selectedDate).getFullYear()}-`))
+    .filter(([dateKey]) => dateKey.startsWith(`${selectedYear}-`) && dateKey <= selectedWeekEnd)
     .flatMap(([, cases]) => cases.filter(matchesSelectedFacility));
 
   const weeklyStats = useMemo(
@@ -495,10 +513,30 @@ export default function ORPlannerApp() {
     );
   };
 
+  const addSurgeryFacility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
+  const addSurgerySurgeonOptions = useMemo(() => {
+    const query = caseTemplateSurgeon.trim();
+    return getSurgeonNames(surgeonRosters, addSurgeryFacility)
+      .map((surgeon) => ({ surgeon, rank: surgeonSearchRank(surgeon, query) }))
+      .filter((item) => item.rank < 99)
+      .sort((a, b) => a.rank - b.rank || a.surgeon.localeCompare(b.surgeon))
+      .map((item) => item.surgeon);
+  }, [surgeonRosters, addSurgeryFacility, caseTemplateSurgeon]);
+
+  const resolveCaseTemplateSurgeon = () => {
+    const typed = caseTemplateSurgeon.trim();
+    if (!typed) return "";
+    const allSurgeons = getSurgeonNames(surgeonRosters, addSurgeryFacility);
+    const exact = allSurgeons.find((surgeon) => normalizeSurgeonSearch(surgeon) === normalizeSurgeonSearch(typed));
+    if (exact) return exact;
+    if (addSurgerySurgeonOptions.length === 1) return addSurgerySurgeonOptions[0];
+    return typed;
+  };
+
   const addCase = () => {
-    const facility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
+    const facility = addSurgeryFacility;
     const quantity = Math.max(1, Number.parseInt(caseQuantity, 10) || 1);
-    const selectedSurgeon = caseTemplateSurgeon.trim();
+    const selectedSurgeon = resolveCaseTemplateSurgeon();
 
     if (quantity > 1 && !selectedSurgeon) {
       alert("Please select a surgeon before adding multiple cases.");
@@ -972,14 +1010,29 @@ export default function ORPlannerApp() {
                   value={caseTemplateSurgeon}
                   onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  className="input"
+                  className="input md:hidden"
                   disabled={facilities.length === 0}
                 >
                   <option value="">Select surgeon</option>
-                  {getSurgeonNames(surgeonRosters, selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility).map((surgeon) => (
+                  {getSurgeonNames(surgeonRosters, addSurgeryFacility).map((surgeon) => (
                     <option key={surgeon} value={surgeon}>{surgeon}</option>
                   ))}
                 </select>
+
+                <input
+                  value={caseTemplateSurgeon}
+                  onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                  list="add-surgery-surgeon-list"
+                  placeholder="Search surgeon"
+                  className="input hidden md:block"
+                  disabled={facilities.length === 0}
+                />
+                <datalist id="add-surgery-surgeon-list">
+                  {addSurgerySurgeonOptions.map((surgeon) => (
+                    <option key={surgeon} value={surgeon} />
+                  ))}
+                </datalist>
                 <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
               </div>
 
