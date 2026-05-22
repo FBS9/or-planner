@@ -905,17 +905,8 @@ export default function ORPlannerApp() {
     URL.revokeObjectURL(url);
   };
 
-  const blurAfterMobileTap = (event) => {
-    const target = event.target;
-    const tag = target?.tagName?.toLowerCase?.();
-    const type = target?.getAttribute?.("type")?.toLowerCase?.();
-    const shouldBlur = tag === "button" || type === "checkbox" || type === "radio";
-    if (!shouldBlur) return;
-    window.requestAnimationFrame(() => target.blur?.());
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }} onPointerUpCapture={blurAfterMobileTap}>
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
