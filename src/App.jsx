@@ -205,6 +205,7 @@ export default function ORPlannerApp() {
   const [caseTemplateProcedure, setCaseTemplateProcedure] = useState("");
   const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
+  const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
@@ -1046,9 +1047,17 @@ export default function ORPlannerApp() {
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="space-y-4 p-4">
-              <div>
-                <h2 className="text-xl font-bold">{selectedDayName}</h2>
-                <p className="text-sm text-slate-500">{formatLongDate(selectedDate)}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">{selectedDayName}</h2>
+                  <p className="text-sm text-slate-500">{formatLongDate(selectedDate)}</p>
+                </div>
+                <button
+                  onClick={() => setShowMobileAddCase((prev) => !prev)}
+                  className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm md:hidden"
+                >
+                  {showMobileAddCase ? "Close" : "Add Case"}
+                </button>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1083,106 +1092,108 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">Search</label>
-                <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
-                  <Search className="h-4 w-4 text-slate-400" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Surgeon, procedure, note..." className="w-full bg-transparent px-2 py-3 text-sm outline-none" />
+              <div className={`${showMobileAddCase ? "block" : "hidden"} space-y-4 md:block`}>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Search</label>
+                  <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
+                    <Search className="h-4 w-4 text-slate-400" />
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Surgeon, procedure, note..." className="w-full bg-transparent px-2 py-3 text-sm outline-none" />
+                  </div>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Surgeon</label>
+                  <select
+                    id="add-surgery-surgeon-mobile"
+                    ref={mobileSurgeonInputRef}
+                    value={caseTemplateSurgeon}
+                    onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); selectSurgeonAndMoveToProcedure(); } }}
+                    className="input md:hidden"
+                    disabled={facilities.length === 0}
+                  >
+                    <option value="">Select surgeon</option>
+                    {getSurgeonNames(surgeonRosters, addSurgeryFacility).map((surgeon) => (
+                      <option key={surgeon} value={surgeon}>{surgeon}</option>
+                    ))}
+                  </select>
+
+                  <input
+                    id="add-surgery-surgeon-desktop"
+                    ref={desktopSurgeonInputRef}
+                    value={caseTemplateSurgeon}
+                    onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        selectSurgeonAndMoveToProcedure();
+                      }
+                    }}
+                    list="add-surgery-surgeon-list"
+                    placeholder="Search surgeon"
+                    className="input hidden md:block"
+                    disabled={facilities.length === 0}
+                  />
+                  <datalist id="add-surgery-surgeon-list">
+                    {addSurgerySurgeonOptions.map((surgeon) => (
+                      <option key={surgeon} value={surgeon} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Procedure</label>
+                  <input
+                    ref={procedureInputRef}
+                    value={caseTemplateProcedure}
+                    onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                    placeholder="Type procedure"
+                    className="input md:hidden"
+                  />
+                  <select
+                    value={procedureOptionsForSpecialty.includes(caseTemplateProcedure) ? caseTemplateProcedure : ""}
+                    onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                    className="input md:hidden"
+                  >
+                    <option value="">{filteredProcedureOptions.length ? "Matching saved procedures" : procedureOptionsForSpecialty.length ? "No matching saved procedures" : "No saved procedures yet"}</option>
+                    {filteredProcedureOptions.map((procedure) => (
+                      <option key={procedure} value={procedure}>{procedure}</option>
+                    ))}
+                  </select>
+                  <input
+                    ref={procedureInputRef}
+                    value={caseTemplateProcedure}
+                    onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                    list="add-surgery-procedure-list"
+                    placeholder={addSurgerySpecialty ? `Search ${addSurgerySpecialty} procedures` : "Procedure"}
+                    className="input hidden md:block"
+                  />
+                  <datalist id="add-surgery-procedure-list">
+                    {filteredProcedureOptions.map((procedure) => (
+                      <option key={procedure} value={procedure} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={caseQuantity}
+                    onChange={(e) => setCaseQuantity(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
+                    placeholder="1"
+                    className="input"
+                  />
+                </div>
+
+                <Button onClick={addCase} disabled={facilities.length === 0} className="w-full rounded-2xl py-6 text-base shadow-sm"><Plus className="mr-2 h-4 w-4" /> Add Surgery</Button>
               </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">Surgeon</label>
-                <select
-                  id="add-surgery-surgeon-mobile"
-                  ref={mobileSurgeonInputRef}
-                  value={caseTemplateSurgeon}
-                  onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); selectSurgeonAndMoveToProcedure(); } }}
-                  className="input md:hidden"
-                  disabled={facilities.length === 0}
-                >
-                  <option value="">Select surgeon</option>
-                  {getSurgeonNames(surgeonRosters, addSurgeryFacility).map((surgeon) => (
-                    <option key={surgeon} value={surgeon}>{surgeon}</option>
-                  ))}
-                </select>
-
-                <input
-                  id="add-surgery-surgeon-desktop"
-                  ref={desktopSurgeonInputRef}
-                  value={caseTemplateSurgeon}
-                  onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      selectSurgeonAndMoveToProcedure();
-                    }
-                  }}
-                  list="add-surgery-surgeon-list"
-                  placeholder="Search surgeon"
-                  className="input hidden md:block"
-                  disabled={facilities.length === 0}
-                />
-                <datalist id="add-surgery-surgeon-list">
-                  {addSurgerySurgeonOptions.map((surgeon) => (
-                    <option key={surgeon} value={surgeon} />
-                  ))}
-                </datalist>
-                <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">Procedure</label>
-                <input
-                  ref={procedureInputRef}
-                  value={caseTemplateProcedure}
-                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  placeholder="Type procedure"
-                  className="input md:hidden"
-                />
-                <select
-                  value={procedureOptionsForSpecialty.includes(caseTemplateProcedure) ? caseTemplateProcedure : ""}
-                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  className="input md:hidden"
-                >
-                  <option value="">{filteredProcedureOptions.length ? "Matching saved procedures" : procedureOptionsForSpecialty.length ? "No matching saved procedures" : "No saved procedures yet"}</option>
-                  {filteredProcedureOptions.map((procedure) => (
-                    <option key={procedure} value={procedure}>{procedure}</option>
-                  ))}
-                </select>
-                <input
-                  ref={procedureInputRef}
-                  value={caseTemplateProcedure}
-                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  list="add-surgery-procedure-list"
-                  placeholder={addSurgerySpecialty ? `Search ${addSurgerySpecialty} procedures` : "Procedure"}
-                  className="input hidden md:block"
-                />
-                <datalist id="add-surgery-procedure-list">
-                  {filteredProcedureOptions.map((procedure) => (
-                    <option key={procedure} value={procedure} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">Quantity</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={caseQuantity}
-                  onChange={(e) => setCaseQuantity(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addCase(); }}
-                  placeholder="1"
-                  className="input"
-                />
-              </div>
-
-              <Button onClick={addCase} disabled={facilities.length === 0} className="w-full rounded-2xl py-6 text-base shadow-sm"><Plus className="mr-2 h-4 w-4" /> Add Surgery</Button>
             </CardContent>
           </Card>
 
