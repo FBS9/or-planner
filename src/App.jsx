@@ -1269,17 +1269,6 @@ export default function ORPlannerApp() {
 
               <div className={`${addCasePanelClass} space-y-4`}>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">Time</label>
-                  <input
-                    value={caseTemplateTime}
-                    onChange={(e) => setCaseTemplateTime(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") selectFacilityAndMoveToSurgeon(selectedFacility); }}
-                    placeholder="Time, ex: 7:30"
-                    className="input"
-                  />
-                </div>
-
-                <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
                   <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
                     <Search className="h-4 w-4 text-slate-400" />
@@ -1326,6 +1315,17 @@ export default function ORPlannerApp() {
                     ))}
                   </datalist>
                   <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-slate-600">Time</label>
+                  <input
+                    value={caseTemplateTime}
+                    onChange={(e) => setCaseTemplateTime(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") procedureInputRef.current?.focus?.(); }}
+                    placeholder="Time, ex: 7:30"
+                    className="input"
+                  />
                 </div>
 
                 <div className="space-y-2">
