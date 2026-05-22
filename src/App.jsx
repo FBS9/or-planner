@@ -148,6 +148,35 @@ const blankCase = (dateKey, facility = "") => ({
 
 const caseSurgeonName = (c) => c.surgeon || "";
 
+const parseTimeToMinutes = (value = "") => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return null;
+  const cleaned = raw
+    .replaceAll(" ", "")
+    .replaceAll(String.fromCharCode(9), "")
+    .replaceAll(String.fromCharCode(10), "")
+    .replaceAll(String.fromCharCode(13), "");
+  const match = cleaned.match(/^([0-9]{1,2})(?::?([0-9]{2}))?([ap]m?|)?$/);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const suffix = match[3] || "";
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes > 59) return null;
+  if (suffix.startsWith("p") && hours < 12) hours += 12;
+  if (suffix.startsWith("a") && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+};
+
+const compareCasesByTime = (a, b) => {
+  const aTime = parseTimeToMinutes(a.time);
+  const bTime = parseTimeToMinutes(b.time);
+  const aHasTime = aTime !== null;
+  const bHasTime = bTime !== null;
+  if (aHasTime !== bHasTime) return aHasTime ? 1 : -1;
+  if (!aHasTime && !bHasTime) return 0;
+  return aTime - bTime;
+};
+
 function exportToCsv(casesByDate, surgeonRosters = {}) {
   const headers = ["Date", "Day", "Facility", "Time", "Surgeon", "Subspecialty", "Procedure", "Fast Tracking", "Reconciled", "Growth", "Notes"];
   const rows = Object.entries(casesByDate)
@@ -262,7 +291,7 @@ export default function ORPlannerApp() {
     return {
       dateKey,
       facilities: facilitiesForDay.map((facility) => {
-        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility);
+        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility).sort(compareCasesByTime);
         const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
         return {
           facility,
@@ -270,7 +299,8 @@ export default function ORPlannerApp() {
             surgeon,
             procedures: facilityCases
               .filter((item) => (item.surgeon || "No Surgeon") === surgeon)
-              .map((item) => item.procedure || "No Procedure"),
+              .sort(compareCasesByTime)
+              .map((item) => ({ procedure: item.procedure || "No Procedure", time: item.time || "" })),
           })),
         };
       }),
@@ -307,7 +337,7 @@ export default function ORPlannerApp() {
     return {
       dateKey,
       facilities: facilitiesForDay.map((facility) => {
-        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility);
+        const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility).sort(compareCasesByTime);
         const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
         return {
           facility,
@@ -315,7 +345,7 @@ export default function ORPlannerApp() {
             surgeon,
             procedures: facilityCases
               .filter((item) => (item.surgeon || "No Surgeon") === surgeon)
-              .map((item) => item.procedure || "No Procedure"),
+              .map((item) => ({ procedure: item.procedure || "No Procedure", time: item.time || "" })),
           })),
         };
       }),
@@ -618,12 +648,7 @@ export default function ORPlannerApp() {
         const searchMatch = !q || searchFields.some((field) => String(field || "").toLowerCase().includes(q));
         return facilityMatch && searchMatch;
       })
-      .sort((a, b) => {
-        const aHasTime = Boolean((a.time || "").trim());
-        const bHasTime = Boolean((b.time || "").trim());
-        if (aHasTime !== bHasTime) return aHasTime ? 1 : -1;
-        return String(a.time || "").localeCompare(String(b.time || ""));
-      });
+      .sort(compareCasesByTime);
   }, [selectedDateCases, selectedFacility, search, surgeonRosters]);
 
   const isAutoGrowthSurgeon = (surgeonName) => {
@@ -1382,7 +1407,7 @@ export default function ORPlannerApp() {
                       <div className="mt-4 space-y-5">
                         {statReportGroups.map((day) => (
                           <div key={day.dateKey}>
-                            <div className="mb-2 text-base font-bold text-slate-900">{fromDateKey(day.dateKey).toLocaleDateString(undefined, { weekday: "long" })}</div>
+                            <div className="mb-2 text-base font-bold text-slate-900">{fromDateKey(day.dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</div>
                             <div className="space-y-3">
                               {day.facilities.map((facilityGroup) => (
                                 <div key={facilityGroup.facility} className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
@@ -1392,8 +1417,8 @@ export default function ORPlannerApp() {
                                       <div key={surgeonGroup.surgeon} className="pl-2">
                                         <div className="font-semibold text-slate-700">- {surgeonGroup.surgeon}</div>
                                         <div className="ml-5 mt-1 space-y-1 text-sm text-slate-600">
-                                          {surgeonGroup.procedures.map((procedure, index) => (
-                                            <div key={`${procedure}-${index}`}>- {procedure}</div>
+                                          {surgeonGroup.procedures.map((caseItem, index) => (
+                                            <div key={`${caseItem.procedure}-${caseItem.time}-${index}`}>- {caseItem.time ? `${caseItem.time} — ` : ""}{caseItem.procedure}</div>
                                           ))}
                                         </div>
                                       </div>
