@@ -206,6 +206,7 @@ export default function ORPlannerApp() {
   const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
+  const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
@@ -240,10 +241,20 @@ export default function ORPlannerApp() {
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
   const weekDates = useMemo(() => orderedDays.map((_, index) => toDateKey(addDays(weekStart, index))), [weekStart, orderedDays]);
   const selectedDayName = fromDateKey(selectedDate).toLocaleDateString(undefined, { weekday: "long" });
+  const unreconciledWeekCases = weekDates.flatMap((dateKey) =>
+    (casesByDate[dateKey] || [])
+      .filter((item) => !item.reconciled)
+      .map((item) => ({ ...item, displayDateKey: dateKey }))
+  );
   const isDesktopLayout = layoutMode === "desktop";
   const isMobileLayout = layoutMode === "mobile";
   const mobileOnlyClass = isDesktopLayout ? "hidden" : isMobileLayout ? "block" : "md:hidden";
   const desktopOnlyClass = isDesktopLayout ? "block" : isMobileLayout ? "hidden" : "hidden md:block";
+  const addCasePanelClass = isDesktopLayout
+    ? "block"
+    : isMobileLayout
+      ? showMobileAddCase ? "block" : "hidden"
+      : `${showMobileAddCase ? "block" : "hidden"} md:block`; 
 
   useEffect(() => {
     localStorage.setItem("or-planner-layout-mode", layoutMode);
@@ -1109,11 +1120,21 @@ export default function ORPlannerApp() {
                   <option value={ALL_FACILITIES}>{ALL_FACILITIES}</option>
                   {sortedFacilities.map((facility) => <option key={facility}>{facility}</option>)}
                 </select>
+
+                <label className="mt-2 flex items-center gap-2 rounded-2xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 ring-1 ring-amber-100">
+                  <input
+                    type="checkbox"
+                    checked={showUnreconciledOnly}
+                    onChange={(e) => setShowUnreconciledOnly(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Show unreconciled cases this week
+                  <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs text-amber-700 ring-1 ring-amber-100">{unreconciledWeekCases.length}</span>
+                </label>
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              <div className={`${isDesktopLayout ? "block" : isMobileLayout ? (showMobileAddCase ? "block" : "hidden") : `${showMobileAddCase ? "block" : "hidden"} md:block`} space-y-4`}> 
-                <div className="space-y-2">
+              <div className={`${addCasePanelClass} space-y-4`}><div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
                   <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-3">
                     <Search className="h-4 w-4 text-slate-400" />
@@ -1224,7 +1245,29 @@ export default function ORPlannerApp() {
               </div>
 
               <div className="space-y-3">
-                {visibleCases.length === 0 ? (
+                {showUnreconciledOnly ? (
+                unreconciledWeekCases.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-5 text-center text-sm text-slate-500">
+                    No unreconciled cases for this selected week.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {unreconciledWeekCases.map((item) => (
+                      <div key={`${item.displayDateKey}-${item.id}`} className="rounded-2xl border border-amber-100 bg-amber-50 p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-bold text-slate-900">{fromDateKey(item.displayDateKey).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
+                          <div className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">Unreconciled</div>
+                        </div>
+                        <div className="mt-2 grid gap-1 text-slate-700">
+                          <div><span className="font-semibold">Facility:</span> {item.facility || "—"}</div>
+                          <div><span className="font-semibold">Surgeon:</span> {item.surgeon || "—"}</div>
+                          <div><span className="font-semibold">Procedure:</span> {item.procedure || "—"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : visibleCases.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center">
                     <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100"><ClipboardList className="h-6 w-6 text-slate-500" /></div>
                     <h3 className="font-bold">No surgeries shown</h3>
