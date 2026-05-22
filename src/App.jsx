@@ -167,6 +167,9 @@ export default function ORPlannerApp() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [selectedFacility, setSelectedFacility] = useState(ALL_FACILITIES);
   const [search, setSearch] = useState("");
+  const [caseTemplateProcedure, setCaseTemplateProcedure] = useState("");
+  const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
+  const [caseQuantity, setCaseQuantity] = useState(1);
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const [newFacilityName, setNewFacilityName] = useState("");
@@ -483,10 +486,25 @@ export default function ORPlannerApp() {
 
   const addCase = () => {
     const facility = selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility;
-    const surgeons = getSurgeonNames(surgeonRosters, facility);
-    const firstSurgeon = surgeons[0] || "";
-    const newCase = { ...blankCase(selectedDate, facility), surgeon: firstSurgeon, growth: isAutoGrowthSurgeon(firstSurgeon) };
-    setCasesByDate((prev) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), newCase] }));
+    const quantity = Math.max(1, Number.parseInt(caseQuantity, 10) || 1);
+    const selectedSurgeon = caseTemplateSurgeon.trim();
+
+    if (quantity > 1 && !selectedSurgeon) {
+      alert("Please select a surgeon before adding multiple cases.");
+      return;
+    }
+
+    const casesToAdd = Array.from({ length: quantity }, () => ({
+      ...blankCase(selectedDate, facility),
+      time: "",
+      surgeon: selectedSurgeon,
+      procedure: caseTemplateProcedure.trim(),
+      growth: isAutoGrowthSurgeon(selectedSurgeon),
+    }));
+    setCasesByDate((prev) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), ...casesToAdd] }));
+    setCaseTemplateProcedure("");
+    setCaseTemplateSurgeon("");
+    setCaseQuantity(1);
   };
 
   const updateCase = (id, patch) => {
@@ -931,6 +949,44 @@ export default function ORPlannerApp() {
                   <Search className="h-4 w-4 text-slate-400" />
                   <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Surgeon, procedure, note..." className="w-full bg-transparent px-2 py-3 text-sm outline-none" />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Surgeon</label>
+                <select
+                  value={caseTemplateSurgeon}
+                  onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                  className="input"
+                  disabled={facilities.length === 0}
+                >
+                  <option value="">Select surgeon</option>
+                  {getSurgeonNames(surgeonRosters, selectedFacility === ALL_FACILITIES ? facilities[0] || "" : selectedFacility).map((surgeon) => (
+                    <option key={surgeon} value={surgeon}>{surgeon}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Procedure</label>
+                <input
+                  value={caseTemplateProcedure}
+                  onChange={(e) => setCaseTemplateProcedure(e.target.value)}
+                  placeholder="Procedure"
+                  className="input"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Quantity</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={caseQuantity}
+                  onChange={(e) => setCaseQuantity(e.target.value)}
+                  placeholder="1"
+                  className="input"
+                />
               </div>
 
               <Button onClick={addCase} disabled={facilities.length === 0} className="w-full rounded-2xl py-6 text-base shadow-sm"><Plus className="mr-2 h-4 w-4" /> Add Surgery</Button>
