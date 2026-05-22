@@ -279,23 +279,29 @@ export default function ORPlannerApp() {
 
   const activeStatReportType = statReportType || (showFastTrackedReport ? "fastTracking" : null);
   const statReportLabels = {
-    total: "Total Cases",
-    growth: "Growth Cases",
+    total: "Week Total Cases",
+    growth: "Week Growth Cases",
     fastTracking: "Fast Tracked Cases",
     reconciled: "Reconciled Cases",
+    yearTotal: "Year Total Cases",
+    yearGrowth: "Year Growth Cases",
   };
-  const statReportCases = activeStatReportType ? weekDates.flatMap((dateKey) =>
+  const statReportDateKeys = activeStatReportType === "yearTotal" || activeStatReportType === "yearGrowth"
+    ? Object.keys(casesByDate).filter((dateKey) => dateKey.startsWith(`${selectedYear}-`) && dateKey <= selectedWeekEnd).sort()
+    : weekDates;
+
+  const statReportCases = activeStatReportType ? statReportDateKeys.flatMap((dateKey) =>
     (casesByDate[dateKey] || [])
       .filter((item) => {
-        if (activeStatReportType === "total") return true;
-        if (activeStatReportType === "growth") return item.growth;
+        if (activeStatReportType === "total" || activeStatReportType === "yearTotal") return true;
+        if (activeStatReportType === "growth" || activeStatReportType === "yearGrowth") return item.growth;
         if (activeStatReportType === "fastTracking") return item.fastTracking;
         if (activeStatReportType === "reconciled") return item.reconciled;
         return false;
       })
       .map((item) => ({ ...item, displayDateKey: dateKey }))
   ) : [];
-  const statReportGroups = weekDates.map((dateKey) => {
+  const statReportGroups = statReportDateKeys.map((dateKey) => {
     const dayCases = statReportCases.filter((item) => item.displayDateKey === dateKey);
     const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
     return {
@@ -999,12 +1005,12 @@ export default function ORPlannerApp() {
         </Card>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-          <StatCard title="Week Total" value={weeklyStats.total} icon={<ClipboardList className="h-5 w-5" />} />
-          <StatCard title="Week Growth" value={weeklyStats.growth} icon={<Plus className="h-5 w-5" />} />
-          <StatCard title="Fast Tracking" value={weeklyStats.fastTracking} icon={<CheckCircle2 className="h-5 w-5" />} />
-          <StatCard title="Reconciled" value={weeklyStats.reconciled} icon={<CheckCircle2 className="h-5 w-5" />} />
-          <StatCard title="Year Total" value={yearlyStats.total} icon={<ClipboardList className="h-5 w-5" />} />
-          <StatCard title="Year Growth" value={yearlyStats.growth} icon={<Plus className="h-5 w-5" />} />
+          <StatCard title="Week Total" value={weeklyStats.total} icon={<ClipboardList className="h-5 w-5" />} onClick={() => setStatReportType("total")} />
+          <StatCard title="Week Growth" value={weeklyStats.growth} icon={<Plus className="h-5 w-5" />} onClick={() => setStatReportType("growth")} />
+          <StatCard title="Fast Tracking" value={weeklyStats.fastTracking} icon={<CheckCircle2 className="h-5 w-5" />} onClick={() => setStatReportType("fastTracking")} />
+          <StatCard title="Reconciled" value={weeklyStats.reconciled} icon={<CheckCircle2 className="h-5 w-5" />} onClick={() => setStatReportType("reconciled")} />
+          <StatCard title="Year Total" value={yearlyStats.total} icon={<ClipboardList className="h-5 w-5" />} onClick={() => setStatReportType("yearTotal")} />
+          <StatCard title="Year Growth" value={yearlyStats.growth} icon={<Plus className="h-5 w-5" />} onClick={() => setStatReportType("yearGrowth")} />
         </div>
 
         <Card className="rounded-3xl shadow-sm">
@@ -1365,7 +1371,7 @@ export default function ORPlannerApp() {
                     <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
                       <div>
                         <h2 className="text-xl font-bold">{statReportLabels[activeStatReportType]}</h2>
-                        <p className="text-sm text-slate-500">Week of {formatLongDate(weekDates[0])}</p>
+                        <p className="text-sm text-slate-500">{activeStatReportType === "yearTotal" || activeStatReportType === "yearGrowth" ? `Year-to-date through ${formatLongDate(selectedWeekEnd)}` : `Week of ${formatLongDate(weekDates[0])}`}</p>
                       </div>
                       <button onClick={() => { setShowFastTrackedReport(false); setStatReportType(null); }} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Close</button>
                     </div>
@@ -1518,16 +1524,30 @@ export default function ORPlannerApp() {
   );
 }
 
-function StatCard({ title, value, icon }) {
+function StatCard({ title, value, icon, onClick }) {
+  const content = (
+    <CardContent className="flex items-center justify-between px-3 py-2.5">
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+        <div className="mt-0.5 text-2xl font-bold leading-none">{value}</div>
+      </div>
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-600 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
+    </CardContent>
+  );
+
+  if (onClick) {
+    return (
+      <button onClick={onClick} className="w-full text-left">
+        <Card className="rounded-2xl shadow-sm transition hover:bg-slate-100 active:scale-[0.99]">
+          {content}
+        </Card>
+      </button>
+    );
+  }
+
   return (
     <Card className="rounded-2xl shadow-sm">
-      <CardContent className="flex items-center justify-between px-3 py-2.5">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-          <div className="mt-0.5 text-2xl font-bold leading-none">{value}</div>
-        </div>
-        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-600 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
-      </CardContent>
+      {content}
     </Card>
   );
 }
