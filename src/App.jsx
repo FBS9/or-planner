@@ -241,6 +241,7 @@ export default function ORPlannerApp() {
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
   const [selectedReviewCase, setSelectedReviewCase] = useState(null);
   const [reviewDraft, setReviewDraft] = useState(null);
+  const [pendingReconcileCase, setPendingReconcileCase] = useState(null);
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
@@ -823,6 +824,34 @@ export default function ORPlannerApp() {
       ),
     }));
     closeUnreconciledCaseEditor();
+  };
+
+  const requestReconcileCase = (dateKey, item) => {
+    if (dateKey <= todayKey) {
+      setCasesByDate((prev) => ({
+        ...prev,
+        [dateKey]: (prev[dateKey] || []).map((c) =>
+          c.id === item.id ? { ...c, reconciled: true } : c
+        ),
+      }));
+      return;
+    }
+    setPendingReconcileCase({ dateKey, item });
+  };
+
+  const confirmReconcileCase = () => {
+    if (!pendingReconcileCase) return;
+    setCasesByDate((prev) => ({
+      ...prev,
+      [pendingReconcileCase.dateKey]: (prev[pendingReconcileCase.dateKey] || []).map((c) =>
+        c.id === pendingReconcileCase.item.id ? { ...c, reconciled: true } : c
+      ),
+    }));
+    setPendingReconcileCase(null);
+  };
+
+  const cancelReconcileCase = () => {
+    setPendingReconcileCase(null);
   };
 
   const resetSelectedDay = () => {
@@ -1581,7 +1610,7 @@ export default function ORPlannerApp() {
 
                       <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2">
                         <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
-                        <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
+                        <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => value ? requestReconcileCase(selectedDate, c) : updateCase(c.id, { reconciled: value })} />
                         <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
                         <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
@@ -1593,6 +1622,35 @@ export default function ORPlannerApp() {
           </Card>
         </div>
       </div>
+
+      {pendingReconcileCase && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
+          <motion.div
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="w-full max-w-lg rounded-3xl bg-white p-4 shadow-2xl ring-1 ring-slate-200"
+          >
+            <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Confirm Reconcile</div>
+            <h2 className="mt-1 text-xl font-bold text-slate-900">Are you sure?</h2>
+            <p className="mt-1 text-sm text-slate-500">This will mark this case as reconciled.</p>
+
+            <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-sm text-slate-700">
+              <div className="font-bold text-slate-900">{formatLongDate(pendingReconcileCase.dateKey)}</div>
+              <div className="mt-2 grid gap-1">
+                <div><span className="font-semibold">Facility:</span> {pendingReconcileCase.item.facility || "—"}</div>
+                <div><span className="font-semibold">Time:</span> {pendingReconcileCase.item.time || "—"}</div>
+                <div><span className="font-semibold">Surgeon:</span> {pendingReconcileCase.item.surgeon || "—"}</div>
+                <div><span className="font-semibold">Procedure:</span> {pendingReconcileCase.item.procedure || "—"}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={cancelReconcileCase} variant="secondary" className="rounded-2xl py-5">No, Cancel</Button>
+              <Button onClick={confirmReconcileCase} className="rounded-2xl py-5">Yes, Reconcile</Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {selectedReviewCase && reviewDraft && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
