@@ -1099,6 +1099,17 @@ export default function ORPlannerApp() {
 
         <Card className="rounded-3xl shadow-sm">
           <CardContent className="p-3 md:p-4">
+            <div className="mb-3">
+              <select
+                value={selectedFacility}
+                onChange={(e) => syncActiveFacility(e.target.value)}
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm outline-none focus:ring-2 focus:ring-slate-300"
+                aria-label="Viewing facility"
+              >
+                <option value={ALL_FACILITIES}>{ALL_FACILITIES}</option>
+                {sortedFacilities.map((facility) => <option key={facility}>{facility}</option>)}
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-7">
               {weekDates.map((dateKey, index) => {
                 const cases = getCasesForDate(dateKey);
