@@ -788,8 +788,8 @@ export default function ORPlannerApp() {
     }, 220);
   };
 
-  const openUnreconciledCaseEditor = (item) => {
-    setSelectedReviewCase({ dateKey: item.displayDateKey, id: item.id });
+  const openCaseEditor = (dateKey, item, source = "normal") => {
+    setSelectedReviewCase({ dateKey, id: item.id, source });
     setReviewDraft({
       facility: item.facility || "",
       time: item.time || "",
@@ -802,6 +802,8 @@ export default function ORPlannerApp() {
     });
   };
 
+  const openUnreconciledCaseEditor = (item) => openCaseEditor(item.displayDateKey, item, "unreconciled");
+
   const closeUnreconciledCaseEditor = () => {
     setSelectedReviewCase(null);
     setReviewDraft(null);
@@ -811,12 +813,13 @@ export default function ORPlannerApp() {
     setReviewDraft((prev) => prev ? { ...prev, ...patch } : prev);
   };
 
-  const saveReviewCase = () => {
+  const saveReviewCase = (overrides = {}) => {
     if (!selectedReviewCase || !reviewDraft) return;
+    const nextDraft = { ...reviewDraft, ...overrides };
     setCasesByDate((prev) => ({
       ...prev,
       [selectedReviewCase.dateKey]: (prev[selectedReviewCase.dateKey] || []).map((c) =>
-        c.id === selectedReviewCase.id ? { ...c, ...reviewDraft, date: selectedReviewCase.dateKey } : c
+        c.id === selectedReviewCase.id ? { ...c, ...nextDraft, date: selectedReviewCase.dateKey } : c
       ),
     }));
     closeUnreconciledCaseEditor();
@@ -1461,10 +1464,6 @@ export default function ORPlannerApp() {
 
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="p-3 md:p-4">
-              <div className="hidden grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] gap-2 px-2 pb-2 text-xs font-bold uppercase tracking-wide text-slate-500 xl:grid">
-                <div>Time</div><div>Facility</div><div>Surgeon</div><div>Specialty</div><div>Procedure</div><div>FT</div><div>Rec</div><div>Growth</div><div>Notes</div><div></div>
-              </div>
-
               <div className="space-y-3">
                 {activeStatReportType && (
                 <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
@@ -1546,64 +1545,35 @@ export default function ORPlannerApp() {
                 ) : (
                   visibleCases.map((c, index) => (
                     <motion.div
-                        key={c.id}
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : { opacity: 1, scale: 1 }}
-                        transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
-                        className="grid gap-2 rounded-2xl bg-white p-2.5 ring-1 ring-slate-200 xl:rounded-3xl xl:p-3 xl:grid-cols-[85px_1.1fr_1.15fr_1fr_1.5fr_60px_60px_70px_1.2fr_44px] xl:items-center">
-                      <div className="xl:hidden space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Case {index + 1}</span>
-                          <button onClick={() => deleteCase(c.id)} className="rounded-xl p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                      key={c.id}
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : { opacity: 1, scale: 1 }}
+                      transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
+                      className="rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openCaseEditor(selectedDate, c)}
+                        className="w-full text-left transition active:scale-[0.99]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-bold text-slate-900">Case {index + 1}</div>
+                          {c.time && <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">{c.time}</div>}
                         </div>
-
-                        <div className="grid grid-cols-[85px_1fr] gap-2">
-                          <input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="Time" className="mobile-input" />
-                          <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="mobile-input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
-                            {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
-                              <option value="">Add surgeon to roster first</option>
-                            ) : (
-                              getSurgeonNames(surgeonRosters, c.facility).map((surgeon) => <option key={surgeon}>{surgeon}</option>)
-                            )}
-                          </select>
+                        <div className="mt-2 grid gap-1 text-slate-700">
+                          <div><span className="font-semibold">Facility:</span> {c.facility || "—"}</div>
+                          <div><span className="font-semibold">Surgeon:</span> {c.surgeon || "—"}</div>
+                          <div><span className="font-semibold">Procedure:</span> {c.procedure || "—"}</div>
+                          {c.notes && <div><span className="font-semibold">Notes:</span> {c.notes}</div>}
                         </div>
+                      </button>
 
-                        <div className="grid grid-cols-2 gap-2">
-                          <select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="mobile-input">{sortedFacilities.map((f) => <option key={f}>{f}</option>)}</select>
-                          <input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Specialty" className="mobile-input" readOnly />
-                        </div>
-
-                        <input value={c.procedure} onChange={(e) => updateCase(c.id, { procedure: e.target.value })} placeholder="Procedure" className="mobile-input" />
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
-                          <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
-                          <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
-                        </div>
-
-                        <input value={c.notes} onChange={(e) => updateCase(c.id, { notes: e.target.value })} placeholder="Notes / add ons" className="mobile-input" />
+                      <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2">
+                        <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
+                        <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
+                        <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
+                        <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
-
-                      <div className="hidden xl:contents">
-                        <Field label="Time"><input value={c.time} onChange={(e) => updateCase(c.id, { time: e.target.value })} placeholder="7:30" className="input" /></Field>
-                        <Field label="Facility"><select value={c.facility} onChange={(e) => updateCase(c.id, { facility: e.target.value })} className="input">{sortedFacilities.map((f) => <option key={f}>{f}</option>)}</select></Field>
-                        <Field label="Surgeon">
-                          <select value={c.surgeon || ""} onChange={(e) => updateCase(c.id, { surgeon: e.target.value })} className="input" disabled={getSurgeonNames(surgeonRosters, c.facility).length === 0}>
-                            {getSurgeonNames(surgeonRosters, c.facility).length === 0 ? (
-                              <option value="">Add surgeon to roster first</option>
-                            ) : (
-                              getSurgeonNames(surgeonRosters, c.facility).map((surgeon) => <option key={surgeon}>{surgeon}</option>)
-                            )}
-                          </select>
-                        </Field>
-                        <Field label="Subspecialty"><input value={getSubspecialty(surgeonRosters, c.facility, c.surgeon)} placeholder="Subspecialty" className="input" readOnly /></Field>
-                        <Field label="Procedure"><input value={c.procedure} onChange={(e) => updateCase(c.id, { procedure: e.target.value })} placeholder="Procedure" className="input" /></Field>
-                        <Check label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
-                        <Check label="Rec" checked={c.reconciled} onChange={(value) => updateCase(c.id, { reconciled: value })} />
-                        <Check label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
-                        <Field label="Notes"><input value={c.notes} onChange={(e) => updateCase(c.id, { notes: e.target.value })} placeholder="Add ons / follow-up" className="input" /></Field>
-                      </div>
-                      <button onClick={() => deleteCase(c.id)} className="hidden rounded-xl p-3 text-slate-400 hover:bg-red-50 hover:text-red-600 xl:block"><Trash2 className="h-4 w-4" /></button>
                     </motion.div>
                   ))
                 )}
@@ -1622,7 +1592,7 @@ export default function ORPlannerApp() {
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Unreconciled Case</div>
+                <div className="text-xs font-bold uppercase tracking-wide text-amber-700">{reviewDraft.reconciled ? "Case" : "Unreconciled Case"}</div>
                 <h2 className="text-xl font-bold text-slate-900">Review Case</h2>
                 <p className="text-sm text-slate-500">{formatLongDate(selectedReviewCase.dateKey)}</p>
               </div>
@@ -1663,16 +1633,26 @@ export default function ORPlannerApp() {
                 <textarea value={reviewDraft.notes} onChange={(e) => updateReviewDraft({ notes: e.target.value })} placeholder="Add notes" className="input min-h-[90px] resize-none" />
               </label>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className={selectedReviewCase.source === "unreconciled" ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
                 <CompactCheck label="FT" checked={reviewDraft.fastTracking} onChange={(value) => updateReviewDraft({ fastTracking: value })} />
-                <CompactCheck label="Rec" checked={reviewDraft.reconciled} onChange={(value) => updateReviewDraft({ reconciled: value })} />
+                {selectedReviewCase.source !== "unreconciled" && (
+                  <CompactCheck label="Rec" checked={reviewDraft.reconciled} onChange={(value) => updateReviewDraft({ reconciled: value })} />
+                )}
                 <CompactCheck label="Growth" checked={reviewDraft.growth} onChange={(value) => updateReviewDraft({ growth: value })} />
               </div>
 
-              <Button onClick={() => { updateReviewDraft({ reconciled: true }); window.setTimeout(saveReviewCase, 0); }} className="rounded-2xl py-6 text-base shadow-sm">
-                Mark Reconciled & Save
-              </Button>
-              <Button onClick={saveReviewCase} variant="secondary" className="rounded-2xl">Save Changes</Button>
+              {selectedReviewCase.source === "unreconciled" ? (
+                <>
+                  <Button onClick={() => saveReviewCase({ reconciled: true })} className="rounded-2xl py-6 text-base shadow-sm">
+                    Mark Reconciled & Save
+                  </Button>
+                  <Button onClick={() => saveReviewCase()} variant="secondary" className="rounded-2xl">Save Changes</Button>
+                </>
+              ) : (
+                <Button onClick={() => saveReviewCase()} className="rounded-2xl py-6 text-base shadow-sm">
+                  Save
+                </Button>
+              )}
             </div>
           </motion.div>
         </div>
