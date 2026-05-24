@@ -384,7 +384,7 @@ export default function ORPlannerApp() {
 
   const applyPlannerSnapshot = (snapshot = {}) => {
     setPlannerTitle(snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner");
-    setSelectedDate(snapshot.selectedDate || todayKey);
+    setSelectedDate(todayKey);
     setCasesByDate(snapshot.casesByDate || {});
     const nextFacilities = (Array.isArray(snapshot.facilities) ? snapshot.facilities : Object.keys(snapshot.surgeonRosters || {})).sort((a, b) => a.localeCompare(b));
     setFacilities(nextFacilities);
@@ -400,7 +400,7 @@ export default function ORPlannerApp() {
       if (saved) {
         const parsed = JSON.parse(saved);
         setPlannerTitle(parsed.plannerTitle || parsed.weekTitle || "OR Calendar Planner");
-        setSelectedDate(parsed.selectedDate || todayKey);
+        setSelectedDate(todayKey);
         setCasesByDate(parsed.casesByDate || {});
         const parsedFacilities = getFacilitiesFromPlanner(parsed).sort((a, b) => a.localeCompare(b));
         setFacilities(parsedFacilities);
@@ -921,7 +921,7 @@ export default function ORPlannerApp() {
       try {
         const parsed = JSON.parse(String(reader.result));
         setPlannerTitle(parsed.plannerTitle || parsed.weekTitle || "OR Calendar Planner");
-        setSelectedDate(parsed.selectedDate || todayKey);
+        setSelectedDate(todayKey);
         setCasesByDate(parsed.casesByDate || {});
         const importedFacilities = getFacilitiesFromPlanner(parsed).sort((a, b) => a.localeCompare(b));
         setFacilities(importedFacilities);
