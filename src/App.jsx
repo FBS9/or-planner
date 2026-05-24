@@ -239,6 +239,8 @@ export default function ORPlannerApp() {
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
+  const [selectedReviewCase, setSelectedReviewCase] = useState(null);
+  const [reviewDraft, setReviewDraft] = useState(null);
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
@@ -784,6 +786,40 @@ export default function ORPlannerApp() {
       setCasesByDate((prev) => ({ ...prev, [selectedDate]: (prev[selectedDate] || []).filter((c) => c.id !== id) }));
       setDeletingCaseIds((prev) => prev.filter((caseId) => caseId !== id));
     }, 220);
+  };
+
+  const openUnreconciledCaseEditor = (item) => {
+    setSelectedReviewCase({ dateKey: item.displayDateKey, id: item.id });
+    setReviewDraft({
+      facility: item.facility || "",
+      time: item.time || "",
+      surgeon: item.surgeon || "",
+      procedure: item.procedure || "",
+      fastTracking: Boolean(item.fastTracking),
+      reconciled: Boolean(item.reconciled),
+      growth: Boolean(item.growth),
+      notes: item.notes || "",
+    });
+  };
+
+  const closeUnreconciledCaseEditor = () => {
+    setSelectedReviewCase(null);
+    setReviewDraft(null);
+  };
+
+  const updateReviewDraft = (patch) => {
+    setReviewDraft((prev) => prev ? { ...prev, ...patch } : prev);
+  };
+
+  const saveReviewCase = () => {
+    if (!selectedReviewCase || !reviewDraft) return;
+    setCasesByDate((prev) => ({
+      ...prev,
+      [selectedReviewCase.dateKey]: (prev[selectedReviewCase.dateKey] || []).map((c) =>
+        c.id === selectedReviewCase.id ? { ...c, ...reviewDraft, date: selectedReviewCase.dateKey } : c
+      ),
+    }));
+    closeUnreconciledCaseEditor();
   };
 
   const resetSelectedDay = () => {
@@ -1483,17 +1519,21 @@ export default function ORPlannerApp() {
                 ) : (
                   <div className="space-y-3">
                     {unreconciledWeekCases.map((item) => (
-                      <div key={`${item.displayDateKey}-${item.id}`} className="rounded-2xl border border-amber-100 bg-amber-50 p-3 text-sm">
+                      <button
+                        key={`${item.displayDateKey}-${item.id}`}
+                        type="button"
+                        onClick={() => openUnreconciledCaseEditor(item)}
+                        className="w-full rounded-2xl border border-amber-100 bg-amber-50 p-3 text-left text-sm transition hover:bg-amber-100 active:scale-[0.99]"
+                      >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="font-bold text-slate-900">{fromDateKey(item.displayDateKey).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
-                          <div className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">Unreconciled</div>
                         </div>
                         <div className="mt-2 grid gap-1 text-slate-700">
                           <div><span className="font-semibold">Facility:</span> {item.facility || "—"}</div>
                           <div><span className="font-semibold">Surgeon:</span> {item.surgeon || "—"}</div>
                           <div><span className="font-semibold">Procedure:</span> {item.procedure || "—"}</div>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )
@@ -1572,6 +1612,72 @@ export default function ORPlannerApp() {
           </Card>
         </div>
       </div>
+
+      {selectedReviewCase && reviewDraft && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
+          <motion.div
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-4 shadow-2xl ring-1 ring-slate-200"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Unreconciled Case</div>
+                <h2 className="text-xl font-bold text-slate-900">Review Case</h2>
+                <p className="text-sm text-slate-500">{formatLongDate(selectedReviewCase.dateKey)}</p>
+              </div>
+              <button onClick={closeUnreconciledCaseEditor} className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200">Close</button>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Time</span>
+                  <input value={reviewDraft.time} onChange={(e) => updateReviewDraft({ time: e.target.value })} placeholder="7:30" className="input" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Facility</span>
+                  <select value={reviewDraft.facility} onChange={(e) => updateReviewDraft({ facility: e.target.value })} className="input">
+                    <option value="">No Facility</option>
+                    {sortedFacilities.map((facility) => <option key={facility} value={facility}>{facility}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Surgeon</span>
+                <select value={reviewDraft.surgeon} onChange={(e) => updateReviewDraft({ surgeon: e.target.value, growth: isAutoGrowthSurgeon(e.target.value) })} className="input">
+                  <option value="">No Surgeon</option>
+                  {getSurgeonNames(surgeonRosters, reviewDraft.facility).map((surgeon) => <option key={surgeon} value={surgeon}>{surgeon}</option>)}
+                  {reviewDraft.surgeon && !getSurgeonNames(surgeonRosters, reviewDraft.facility).includes(reviewDraft.surgeon) && <option value={reviewDraft.surgeon}>{reviewDraft.surgeon}</option>}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Procedure</span>
+                <input value={reviewDraft.procedure} onChange={(e) => updateReviewDraft({ procedure: e.target.value })} placeholder="Procedure" className="input" />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Notes</span>
+                <textarea value={reviewDraft.notes} onChange={(e) => updateReviewDraft({ notes: e.target.value })} placeholder="Add notes" className="input min-h-[90px] resize-none" />
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <CompactCheck label="FT" checked={reviewDraft.fastTracking} onChange={(value) => updateReviewDraft({ fastTracking: value })} />
+                <CompactCheck label="Rec" checked={reviewDraft.reconciled} onChange={(value) => updateReviewDraft({ reconciled: value })} />
+                <CompactCheck label="Growth" checked={reviewDraft.growth} onChange={(value) => updateReviewDraft({ growth: value })} />
+              </div>
+
+              <Button onClick={() => { updateReviewDraft({ reconciled: true }); window.setTimeout(saveReviewCase, 0); }} className="rounded-2xl py-6 text-base shadow-sm">
+                Mark Reconciled & Save
+              </Button>
+              <Button onClick={saveReviewCase} variant="secondary" className="rounded-2xl">Save Changes</Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       <style>{`
         .input { width: 100%; border-radius: 1rem; border: 1px solid rgb(226 232 240); background: rgb(248 250 252); padding: .75rem .8rem; font-size: 16px; outline: none; }
         .input:focus { box-shadow: 0 0 0 2px rgb(203 213 225); background: white; }
