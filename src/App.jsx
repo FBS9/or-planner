@@ -1329,29 +1329,44 @@ export default function ORPlannerApp() {
     return candidates[0] || null;
   };
 
-  const sfCanonicalProcedureNameForRow = (row, sourceCasesByDate = casesByDate) => {
+  const sfProcedureRosterMatchForRow = (row, sourceCasesByDate = casesByDate) => {
     const procedure = normalizeSfText(row?.procedure);
-    if (!procedure) return "";
+    if (!procedure) return null;
 
     const facility = normalizeSfText(row?.facility);
     const surgeon = normalizeSfText(row?.surgeon);
     const specialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category || getSurgeonSpecialty(surgeonRosters, facility, surgeon));
-    const match = sfBestExistingProcedureMatch(procedure, facility, surgeon, specialty, sourceCasesByDate);
+    return sfBestExistingProcedureMatch(procedure, facility, surgeon, specialty, sourceCasesByDate);
+  };
 
+  const sfCanonicalProcedureNameForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) return "";
+    const match = sfProcedureRosterMatchForRow(row, sourceCasesByDate);
     return match?.procedure || procedure;
   };
 
   const sfCanonicalizeProcedureForRow = (row, sourceCasesByDate = casesByDate) => {
     const procedure = normalizeSfText(row?.procedure);
-    if (!procedure) return row;
+    if (!procedure) {
+      if (!row?.procedureRosterMatchedName && !row?.procedureCanonicalizedFrom) return row;
+      return { ...row, procedureRosterMatchedName: "", procedureCanonicalizedFrom: "" };
+    }
 
-    const canonicalProcedure = sfCanonicalProcedureNameForRow(row, sourceCasesByDate);
-    if (!canonicalProcedure || canonicalProcedure === procedure) return row;
+    const match = sfProcedureRosterMatchForRow(row, sourceCasesByDate);
+    if (!match?.procedure) {
+      if (!row?.procedureRosterMatchedName && !row?.procedureCanonicalizedFrom) return row;
+      return { ...row, procedureRosterMatchedName: "", procedureCanonicalizedFrom: "" };
+    }
+
+    const canonicalProcedure = match.procedure;
+    const sameProcedure = normalizeProcedureSearch(canonicalProcedure) === normalizeProcedureSearch(procedure);
 
     return {
       ...row,
       procedure: canonicalProcedure,
-      procedureCanonicalizedFrom: procedure,
+      procedureRosterMatchedName: canonicalProcedure,
+      procedureCanonicalizedFrom: sameProcedure ? "" : procedure,
     };
   };
 
@@ -2929,7 +2944,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3a · matched procedure roster badge</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3b · always show procedure roster match</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3070,8 +3085,11 @@ export default function ORPlannerApp() {
                             </div>
                             <div className="md:col-span-2">
                               <span className="font-bold">Procedure:</span> {item.procedure || "—"}
+                              {item.procedureRosterMatchedName && (
+                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched procedure roster: {item.procedureRosterMatchedName}</span>
+                              )}
                               {item.procedureCanonicalizedFrom && item.procedureCanonicalizedFrom !== item.procedure && (
-                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched procedure roster: {item.procedureCanonicalizedFrom}</span>
+                                <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from Salesforce: {item.procedureCanonicalizedFrom}</span>
                               )}
                             </div>
                             {(item.scheduledDate || item.salesforceStatus) && (
