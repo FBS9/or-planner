@@ -553,6 +553,20 @@ export default function ORPlannerApp() {
 
   const snapshotToString = (snapshot) => JSON.stringify(snapshot);
 
+  // Cloud sync should compare real planner data, not UI-only state like the
+  // currently selected date. Mobile and desktop can legitimately be viewing
+  // different days, and that should not make one device think it has unsaved
+  // local changes and overwrite the other device's newer cloud data.
+  const snapshotToCloudComparableString = (snapshot = {}) => JSON.stringify({
+    plannerTitle: snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner",
+    casesByDate: snapshot.casesByDate || {},
+    facilities: Array.isArray(snapshot.facilities) ? [...snapshot.facilities].sort((a, b) => a.localeCompare(b)) : [],
+    surgeonRosters: snapshot.surgeonRosters || {},
+    procedureExclusions: Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : [],
+    growthSurgeons: Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : [],
+    weekStartDay: snapshot.weekStartDay || "Sunday",
+  });
+
   const performCloudSave = async ({ silent = false } = {}) => {
     if (!supabase) {
       if (!silent) setCloudStatus("Cloud sync is missing Supabase environment variables.");
@@ -564,7 +578,7 @@ export default function ORPlannerApp() {
     }
 
     const snapshot = getPlannerSnapshot();
-    const snapshotString = snapshotToString(snapshot);
+    const snapshotString = snapshotToCloudComparableString(snapshot);
     if (silent && snapshotString === lastSavedSnapshotRef.current) return;
 
     if (!silent) setCloudBusy(true);
@@ -623,7 +637,7 @@ export default function ORPlannerApp() {
 
     isApplyingCloudRef.current = true;
     applyPlannerSnapshot(data.planner_data);
-    lastSavedSnapshotRef.current = snapshotToString(data.planner_data);
+    lastSavedSnapshotRef.current = snapshotToCloudComparableString(data.planner_data);
     window.setTimeout(() => {
       isApplyingCloudRef.current = false;
       setAutoCloudReady(true);
@@ -651,7 +665,8 @@ export default function ORPlannerApp() {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
 
     const runTwoSecondCloudSync = async () => {
-      if (document.visibilityState && document.visibilityState !== "visible") return;
+      // Do not rely on document.visibilityState here. Some mobile browsers/PWA
+      // views report visibility inconsistently, which can block automatic sync.
       if (isApplyingCloudRef.current || autoCloudSyncInFlightRef.current) return;
 
       autoCloudSyncInFlightRef.current = true;
@@ -673,20 +688,29 @@ export default function ORPlannerApp() {
       }
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") runTwoSecondCloudSync();
-    };
+    const kickMobileCloudSync = () => runTwoSecondCloudSync();
 
+    // Run immediately, then every 2 seconds. The extra mobile interaction events
+    // help iPhone/Safari/PWA views catch up even when timers were throttled.
+    runTwoSecondCloudSync();
     const interval = window.setInterval(runTwoSecondCloudSync, 2000);
-    window.addEventListener("focus", runTwoSecondCloudSync);
-    window.addEventListener("pageshow", runTwoSecondCloudSync);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const timeoutLoop = window.setTimeout(runTwoSecondCloudSync, 750);
+    window.addEventListener("focus", kickMobileCloudSync);
+    window.addEventListener("pageshow", kickMobileCloudSync);
+    window.addEventListener("online", kickMobileCloudSync);
+    window.addEventListener("touchstart", kickMobileCloudSync, { passive: true });
+    window.addEventListener("pointerdown", kickMobileCloudSync, { passive: true });
+    document.addEventListener("visibilitychange", kickMobileCloudSync);
 
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", runTwoSecondCloudSync);
-      window.removeEventListener("pageshow", runTwoSecondCloudSync);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearTimeout(timeoutLoop);
+      window.removeEventListener("focus", kickMobileCloudSync);
+      window.removeEventListener("pageshow", kickMobileCloudSync);
+      window.removeEventListener("online", kickMobileCloudSync);
+      window.removeEventListener("touchstart", kickMobileCloudSync);
+      window.removeEventListener("pointerdown", kickMobileCloudSync);
+      document.removeEventListener("visibilitychange", kickMobileCloudSync);
     };
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
@@ -3186,7 +3210,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3l · cloud sync every 2s</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3m · mobile cloud sync every 2s</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
