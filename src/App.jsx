@@ -1086,7 +1086,7 @@ export default function ORPlannerApp() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
+    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -1487,105 +1487,6 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              {showSalesforceImport && (
-                <div className="w-full space-y-3 overflow-hidden rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
-                      <p className="mt-1 text-xs text-blue-700">
-                        Upload a Salesforce screenshot and extract rows with AI. For now, this safely shows the extracted rows without changing your planner.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={resetSalesforceImport}
-                      className="shrink-0 rounded-xl bg-white px-2 py-1 text-xs font-bold text-blue-700 ring-1 ring-blue-100"
-                    >
-                      Reset
-                    </button>
-                  </div>
-
-                  <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-4 text-center text-sm font-bold text-blue-800">
-                    <Upload className="mb-2 h-5 w-5" />
-                    {sfFile ? sfFile.name : "Upload Salesforce screenshot"}
-                    <span className="mt-1 text-xs font-medium text-blue-500">PNG, JPG, JPEG, or WEBP</span>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/jpg,image/webp"
-                      onChange={handleSalesforceFileChange}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {sfPreviewUrl && (
-                    <img
-                      src={sfPreviewUrl}
-                      alt="Salesforce screenshot preview"
-                      className="max-h-48 w-full rounded-2xl border border-blue-100 bg-white object-contain"
-                    />
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={extractSalesforceCases}
-                    disabled={!sfFile || sfLoading}
-                    className="w-full rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-50"
-                  >
-                    {sfLoading ? "Extracting with AI..." : "Extract Cases with AI"}
-                  </button>
-
-                  {sfError && (
-                    <div className="rounded-2xl bg-red-50 p-3 text-xs font-semibold text-red-700 ring-1 ring-red-100">
-                      {sfError}
-                    </div>
-                  )}
-
-                  {(sfScreenshotType || sfExtractedCases.length > 0) && (
-                    <div className="rounded-2xl bg-white p-3 text-xs text-slate-600 ring-1 ring-blue-100">
-                      <div className="font-bold text-slate-900">Extraction Result</div>
-                      <div className="mt-1">Type: <span className="font-semibold">{sfScreenshotType || "unknown"}</span></div>
-                      {sfAccountName && <div>Account: <span className="font-semibold">{sfAccountName}</span></div>}
-                      <div>Rows found: <span className="font-semibold">{sfExtractedCases.length}</span></div>
-                    </div>
-                  )}
-
-                  {sfExtractedCases.length > 0 && (
-                    <div className="space-y-2">
-                      {sfExtractedCases.map((item, index) => (
-                        <div key={item.id} className="rounded-2xl bg-white p-3 text-xs text-slate-700 ring-1 ring-blue-100">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-bold text-slate-900">Row {index + 1}</div>
-                            <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">{item.confidence}</div>
-                          </div>
-                          <div className="mt-2 grid gap-1">
-                            <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
-                            <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
-                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
-                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
-                            <div><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
-                            {(item.scheduledDate || item.salesforceStatus) && (
-                              <div><span className="font-bold">SF:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}</div>
-                            )}
-                            {item.recommendedAction && <div><span className="font-bold">AI Action:</span> {item.recommendedAction}</div>}
-                            {item.notes && <div className="text-slate-500"><span className="font-bold">Notes:</span> {item.notes}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {sfExtractedCases.length > 0 && (
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full rounded-2xl bg-slate-200 px-4 py-3 text-sm font-bold text-slate-500"
-                    >
-                      Apply to OR Planner coming next
-                    </button>
-                  )}
-                </div>
-              )}
-
               <div className={`${addCasePanelClass} space-y-3 md:space-y-4`}>
                 <div className="space-y-1.5 md:space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
@@ -1944,6 +1845,144 @@ export default function ORPlannerApp() {
               )}
             </div>
           </motion.div>
+        </div>
+      )}
+
+
+      {showSalesforceImport && (
+        <div className="fixed inset-0 z-50 flex bg-slate-950/50 p-0 backdrop-blur-sm md:items-center md:justify-center md:p-6">
+          <div className="flex h-full w-full flex-col overflow-hidden bg-slate-50 shadow-2xl md:h-[88vh] md:max-w-5xl md:rounded-3xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 md:px-6">
+              <div className="min-w-0">
+                <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
+                <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
+                <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                  Upload a Salesforce screenshot and review the extracted rows. This phase only reads and displays rows — it does not change your planner yet.
+                </p>
+              </div>
+
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={resetSalesforceImport}
+                  className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSalesforceImport(false)}
+                  className="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+              <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+                <div className="space-y-4">
+                  <div className="rounded-3xl bg-blue-50 p-4 ring-1 ring-blue-100">
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-5 text-center text-sm font-bold text-blue-800 transition hover:bg-blue-50">
+                      <Upload className="mb-2 h-6 w-6" />
+                      <span className="max-w-full break-words">{sfFile ? sfFile.name : "Upload Salesforce screenshot"}</span>
+                      <span className="mt-1 text-xs font-medium text-blue-500">PNG, JPG, JPEG, or WEBP</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp"
+                        onChange={handleSalesforceFileChange}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {sfPreviewUrl && (
+                      <img
+                        src={sfPreviewUrl}
+                        alt="Salesforce screenshot preview"
+                        className="mt-4 max-h-64 w-full rounded-2xl border border-blue-100 bg-white object-contain"
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={extractSalesforceCases}
+                      disabled={!sfFile || sfLoading}
+                      className="mt-4 w-full rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                    >
+                      {sfLoading ? "Extracting with AI..." : "Extract Cases with AI"}
+                    </button>
+
+                    {sfError && (
+                      <div className="mt-4 rounded-2xl bg-red-50 p-3 text-xs font-semibold text-red-700 ring-1 ring-red-100">
+                        {sfError}
+                      </div>
+                    )}
+                  </div>
+
+                  {(sfScreenshotType || sfExtractedCases.length > 0) && (
+                    <div className="rounded-3xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+                      <div className="font-bold text-slate-900">Extraction Result</div>
+                      <div className="mt-2">Type: <span className="font-semibold">{sfScreenshotType || "unknown"}</span></div>
+                      {sfAccountName && <div>Account: <span className="font-semibold">{sfAccountName}</span></div>}
+                      <div>Rows found: <span className="font-semibold">{sfExtractedCases.length}</span></div>
+                    </div>
+                  )}
+
+                  {sfExtractedCases.length > 0 && (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full rounded-2xl bg-slate-200 px-4 py-3 text-sm font-bold text-slate-500"
+                    >
+                      Apply to OR Planner coming next
+                    </button>
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  {sfExtractedCases.length > 0 ? (
+                    <div className="space-y-3">
+                      {sfExtractedCases.map((item, index) => (
+                        <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-bold text-slate-900">Row {index + 1}</div>
+                            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
+                            <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
+                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
+                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
+                            <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
+                            {(item.scheduledDate || item.salesforceStatus) && (
+                              <div className="md:col-span-2">
+                                <span className="font-bold">Salesforce:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}
+                              </div>
+                            )}
+                            {item.recommendedAction && (
+                              <div className="md:col-span-2">
+                                <span className="font-bold">AI Action:</span> {item.recommendedAction}
+                              </div>
+                            )}
+                            {item.notes && (
+                              <div className="md:col-span-2 text-slate-500">
+                                <span className="font-bold">Notes:</span> {item.notes}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[320px] items-center justify-center rounded-3xl bg-white p-6 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+                      Upload a screenshot and click Extract Cases with AI. Results will appear here in this window.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
