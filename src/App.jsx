@@ -744,17 +744,23 @@ export default function ORPlannerApp() {
           const incoming = payload?.new;
           if (!incoming?.planner_data) return;
 
-          const incomingUpdatedAt = incoming.updated_at || "";
-          if (incomingUpdatedAt && lastCloudUpdatedAtRef.current && incomingUpdatedAt <= lastCloudUpdatedAtRef.current) return;
-
           const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+          const incomingSnapshotString = snapshotToCloudComparableString(incoming.planner_data);
           const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-          const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 3500;
+          const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 5000;
 
-          // Realtime should pull newer cloud data, but it must not overwrite something
-          // this device is actively editing in the last few seconds. If the local
-          // difference is stale, pull the cloud version instead of pushing the stale
-          // phone state back over desktop.
+          // Do not rely on device timestamps here. Phones/desktops can have slightly
+          // different clocks, which can make a newer desktop save look "older" to the
+          // phone. If cloud content differs and this device is not actively editing,
+          // pull the cloud content.
+          if (incomingSnapshotString === localSnapshotString) {
+            lastSavedSnapshotRef.current = localSnapshotString;
+            latestLocalCloudSnapshotRef.current = localSnapshotString;
+            lastCloudUpdatedAtRef.current = incoming.updated_at || lastCloudUpdatedAtRef.current;
+            setCloudSyncActivity("Synced");
+            return;
+          }
+
           if (hasUnsavedLocalWork && localEditIsFresh) return;
 
           setCloudSyncActivity("Live sync...");
@@ -779,7 +785,7 @@ export default function ORPlannerApp() {
       try {
         const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
         const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-        const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 3500;
+        const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 5000;
 
         setCloudSyncActivity("Checking cloud...");
         const { data, error } = await getCloudRecord();
@@ -794,36 +800,34 @@ export default function ORPlannerApp() {
         if (data?.planner_data) {
           const cloudUpdatedAt = data.updated_at || "";
           const cloudSnapshotString = snapshotToCloudComparableString(data.planner_data);
-          const cloudIsNewer = cloudUpdatedAt && (!lastCloudUpdatedAtRef.current || cloudUpdatedAt > lastCloudUpdatedAtRef.current);
           const cloudDiffersFromLocal = cloudSnapshotString !== localSnapshotString;
 
-          // Pull first whenever cloud is newer, unless this device was just edited.
-          // This prevents the phone from repeatedly saving stale old checkbox states
-          // over newer desktop changes.
-          if (cloudIsNewer && cloudDiffersFromLocal && !(hasUnsavedLocalWork && localEditIsFresh)) {
+          // Do not rely on updated_at comparisons for deciding whether to pull.
+          // Mobile and desktop clocks can disagree, so content difference is the
+          // source of truth. If this device has a fresh local edit, save it. Otherwise,
+          // pull the cloud snapshot so desktop changes appear on mobile automatically.
+          if (cloudDiffersFromLocal) {
+            if (hasUnsavedLocalWork && localEditIsFresh) {
+              setCloudSyncActivity("Auto-saving...");
+              await performCloudSave({ silent: true });
+              return;
+            }
+
             applyCloudPlannerData(data.planner_data, data.updated_at, "Synced");
             setCloudStatus(`Auto-synced latest cloud data at ${new Date().toLocaleTimeString()}.`);
             return;
           }
 
-          if (!hasUnsavedLocalWork && cloudSnapshotString === localSnapshotString) {
-            lastSavedSnapshotRef.current = localSnapshotString;
-            latestLocalCloudSnapshotRef.current = localSnapshotString;
-            lastCloudUpdatedAtRef.current = cloudUpdatedAt || lastCloudUpdatedAtRef.current;
-            setCloudSyncActivity("Synced");
-            return;
-          }
+          lastSavedSnapshotRef.current = localSnapshotString;
+          latestLocalCloudSnapshotRef.current = localSnapshotString;
+          lastCloudUpdatedAtRef.current = cloudUpdatedAt || lastCloudUpdatedAtRef.current;
+          setCloudSyncActivity("Synced");
+          return;
         }
 
-        // Only auto-save when the unsaved local change is fresh. A stale difference
-        // usually means another device changed cloud while this device was idle, so
-        // it should not keep pushing old local state forever.
-        if (hasUnsavedLocalWork && localEditIsFresh) {
+        if (hasUnsavedLocalWork) {
           setCloudSyncActivity("Auto-saving...");
           await performCloudSave({ silent: true });
-        } else if (hasUnsavedLocalWork && !localEditIsFresh) {
-          setCloudSyncActivity("Needs sync");
-          setCloudStatus("Cloud has changed or this device is out of date. Tap Sync Now if this does not update automatically.");
         } else {
           setCloudSyncActivity("Synced");
         }
@@ -3352,7 +3356,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3p · conflict-safe cloud sync</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3q · mobile pull-first cloud sync</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
