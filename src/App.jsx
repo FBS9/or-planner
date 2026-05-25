@@ -9,6 +9,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 const WEEK_START_OPTIONS = DAYS;
 const ALL_FACILITIES = "All Facilities";
 const ALL_SURGEONS = "All Surgeons";
+const ALL_PROCEDURE_SPECIALTIES = "All Specialties";
 
 const getOrderedDays = (weekStartDay) => {
   const startIndex = DAYS.indexOf(weekStartDay);
@@ -267,6 +268,12 @@ export default function ORPlannerApp() {
   const [newSurgeonSubspecialty, setNewSurgeonSubspecialty] = useState("");
   const [showSurgeonRosterPanel, setShowSurgeonRosterPanel] = useState(false);
   const [showRosterList, setShowRosterList] = useState(false);
+  const [showProcedureRosterPanel, setShowProcedureRosterPanel] = useState(false);
+  const [showProcedureList, setShowProcedureList] = useState(false);
+  const [procedureRosterSpecialty, setProcedureRosterSpecialty] = useState(ALL_PROCEDURE_SPECIALTIES);
+  const [procedureExclusions, setProcedureExclusions] = useState([]);
+  const [editingProcedureRosterKey, setEditingProcedureRosterKey] = useState("");
+  const [editingProcedureName, setEditingProcedureName] = useState("");
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
   const [weekStartDay, setWeekStartDay] = useState("Sunday");
   const [showWeekSettings, setShowWeekSettings] = useState(false);
@@ -322,6 +329,39 @@ export default function ORPlannerApp() {
       }),
     };
   }).filter((day) => day.facilities.length > 0);
+
+
+  const procedureExclusionKeys = useMemo(() => new Set((procedureExclusions || []).map((item) => normalizeProcedureSearch(typeof item === "string" ? item : item?.procedure)).filter(Boolean)), [procedureExclusions]);
+
+  const isProcedureHiddenFromRoster = (procedure = "") => procedureExclusionKeys.has(normalizeProcedureSearch(procedure));
+
+  const procedureRosterItems = useMemo(() => {
+    const counts = new Map();
+    Object.entries(casesByDate || {}).forEach(([dateKey, cases]) => {
+      (cases || []).forEach((item) => {
+        const procedure = (item.procedure || "").trim();
+        if (!procedure || procedure.length < 2 || procedure.toLowerCase() === "hysterectomy b") return;
+        if (procedureExclusionKeys.has(normalizeProcedureSearch(procedure))) return;
+        const specialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon) || "Unassigned";
+        const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
+        const existing = counts.get(key) || { procedure, specialty, count: 0, lastUsed: "" };
+        existing.count += 1;
+        if (!existing.lastUsed || dateKey > existing.lastUsed) existing.lastUsed = dateKey;
+        counts.set(key, existing);
+      });
+    });
+    return Array.from(counts.values()).sort((a, b) => a.specialty.localeCompare(b.specialty) || a.procedure.localeCompare(b.procedure));
+  }, [casesByDate, surgeonRosters, procedureExclusionKeys]);
+
+  const procedureRosterSpecialties = useMemo(() => {
+    const specialties = Array.from(new Set(procedureRosterItems.map((item) => item.specialty || "Unassigned"))).sort((a, b) => a.localeCompare(b));
+    return [ALL_PROCEDURE_SPECIALTIES, ...specialties];
+  }, [procedureRosterItems]);
+
+  const selectedProcedureRosterItems = useMemo(() => {
+    if (procedureRosterSpecialty === ALL_PROCEDURE_SPECIALTIES) return procedureRosterItems;
+    return procedureRosterItems.filter((item) => item.specialty === procedureRosterSpecialty);
+  }, [procedureRosterItems, procedureRosterSpecialty]);
 
   const selectedYear = fromDateKey(selectedDate).getFullYear();
   const selectedWeekEnd = weekDates[weekDates.length - 1];
@@ -390,6 +430,7 @@ export default function ORPlannerApp() {
     casesByDate,
     facilities: sortedFacilities,
     surgeonRosters,
+    procedureExclusions,
     growthSurgeons,
     weekStartDay,
   });
@@ -403,6 +444,7 @@ export default function ORPlannerApp() {
     setSurgeonRosters(ensureRosterShape(snapshot.surgeonRosters || buildEmptyRosters(nextFacilities), nextFacilities));
     setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
     setGrowthSurgeons(Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : []);
+    setProcedureExclusions(Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : []);
     setWeekStartDay(WEEK_START_OPTIONS.includes(snapshot.weekStartDay) ? snapshot.weekStartDay : "Sunday");
   };
 
@@ -419,6 +461,7 @@ export default function ORPlannerApp() {
         setRosterFacility((prev) => prev === ALL_SURGEONS || parsedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
+        setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } else {
         const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
@@ -438,6 +481,7 @@ export default function ORPlannerApp() {
           setRosterFacility((prev) => prev === ALL_SURGEONS || oldFacilities.includes(prev) ? prev : ALL_SURGEONS);
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
           setGrowthSurgeons(Array.isArray(old.growthSurgeons) ? old.growthSurgeons : []);
+          setProcedureExclusions(Array.isArray(old.procedureExclusions) ? old.procedureExclusions : []);
           setWeekStartDay(migratedWeekStartDay);
         }
       }
@@ -451,7 +495,7 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(getPlannerSnapshot()));
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -609,7 +653,7 @@ export default function ORPlannerApp() {
     }, 2000);
 
     return () => window.clearTimeout(timeout);
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -704,13 +748,13 @@ export default function ORPlannerApp() {
     Object.entries(casesByDate).forEach(([, cases]) => {
       (cases || []).forEach((item) => {
         const procedure = (item.procedure || "").trim();
-        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b") return;
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b" || isProcedureHiddenFromRoster(procedure)) return;
         const itemSpecialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon);
         if (normalizeProcedureSearch(itemSpecialty) === specialty) procedures.add(procedure);
       });
     });
     return Array.from(procedures).sort((a, b) => a.localeCompare(b));
-  }, [casesByDate, surgeonRosters, addSurgerySpecialty]);
+  }, [casesByDate, surgeonRosters, addSurgerySpecialty, procedureExclusionKeys]);
 
   const filteredProcedureOptions = useMemo(() => {
     const query = normalizeProcedureSearch(caseTemplateProcedure);
@@ -900,6 +944,62 @@ export default function ORPlannerApp() {
     setGrowthSurgeons((prev) => prev.filter((s) => s !== surgeon));
   };
 
+  const removeProcedureFromRoster = (procedure) => {
+    const cleanProcedure = (procedure || "").trim();
+    if (!cleanProcedure) return;
+    const confirmed = window.confirm(`Hide "${cleanProcedure}" from saved procedure suggestions and Salesforce matching? Existing cases will not be deleted.`);
+    if (!confirmed) return;
+    setProcedureExclusions((prev) => {
+      const existing = new Set((prev || []).map((item) => normalizeProcedureSearch(typeof item === "string" ? item : item?.procedure)).filter(Boolean));
+      const key = normalizeProcedureSearch(cleanProcedure);
+      if (existing.has(key)) return prev;
+      return [...(prev || []), cleanProcedure];
+    });
+  };
+
+  const procedureRosterItemKey = (item) => `${normalizeProcedureSearch(item?.specialty || "Unassigned")}::${normalizeProcedureSearch(item?.procedure || "")}`;
+
+  const startEditingProcedureFromRoster = (item) => {
+    setEditingProcedureRosterKey(procedureRosterItemKey(item));
+    setEditingProcedureName(item?.procedure || "");
+  };
+
+  const cancelEditingProcedureFromRoster = () => {
+    setEditingProcedureRosterKey("");
+    setEditingProcedureName("");
+  };
+
+  const saveProcedureRosterRename = (item) => {
+    const oldProcedure = (item?.procedure || "").trim();
+    const newProcedure = editingProcedureName.trim();
+    const specialty = item?.specialty || "Unassigned";
+    if (!oldProcedure || !newProcedure) return;
+    if (normalizeProcedureSearch(oldProcedure) === normalizeProcedureSearch(newProcedure)) {
+      cancelEditingProcedureFromRoster();
+      return;
+    }
+
+    const confirmed = window.confirm(`Rename procedure "${oldProcedure}" to "${newProcedure}" for ${specialty}? Existing cases using this saved procedure will be updated. Nothing will be deleted.`);
+    if (!confirmed) return;
+
+    setCasesByDate((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([dateKey, cases]) => {
+        next[dateKey] = (cases || []).map((caseItem) => {
+          const caseProcedure = (caseItem.procedure || "").trim();
+          if (normalizeProcedureSearch(caseProcedure) !== normalizeProcedureSearch(oldProcedure)) return caseItem;
+          const caseSpecialty = getSurgeonSpecialty(surgeonRosters, caseItem.facility, caseItem.surgeon) || "Unassigned";
+          if (specialty !== ALL_PROCEDURE_SPECIALTIES && normalizeProcedureSearch(caseSpecialty) !== normalizeProcedureSearch(specialty)) return caseItem;
+          return { ...caseItem, procedure: newProcedure };
+        });
+      });
+      return next;
+    });
+
+    setProcedureExclusions((prev) => (prev || []).filter((entry) => normalizeProcedureSearch(typeof entry === "string" ? entry : entry?.procedure) !== normalizeProcedureSearch(newProcedure)));
+    cancelEditingProcedureFromRoster();
+  };
+
   const toggleGrowthSurgeon = (surgeon) => {
     setGrowthSurgeons((prev) => (prev.includes(surgeon) ? prev.filter((s) => s !== surgeon) : [...prev, surgeon]));
   };
@@ -968,6 +1068,7 @@ export default function ORPlannerApp() {
         setRosterFacility((prev) => prev === ALL_SURGEONS || importedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
+        setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } catch {
         alert("Could not import that file. Please use an exported OR Planner JSON backup.");
@@ -978,7 +1079,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1039,10 +1140,234 @@ export default function ORPlannerApp() {
 
   const sfSurgeonScore = (left = "", right = "") => {
     const similarity = sfSimilarityScore(left, right);
-    const leftLast = sfLastName(left);
-    const rightLast = sfLastName(right);
-    const lastNameMatch = leftLast && rightLast && leftLast === rightLast ? 0.9 : 0;
-    return Math.max(similarity, lastNameMatch);
+    const leftTokens = sfTokens(left).filter((token) => token !== "dr");
+    const rightTokens = sfTokens(right).filter((token) => token !== "dr");
+    const leftLast = leftTokens[leftTokens.length - 1] || "";
+    const rightLast = rightTokens[rightTokens.length - 1] || "";
+    const leftFirst = leftTokens[0] || "";
+    const rightFirst = rightTokens[0] || "";
+    const sameLast = leftLast && rightLast && leftLast === rightLast;
+    const firstCompatible =
+      !leftFirst ||
+      !rightFirst ||
+      leftFirst === rightFirst ||
+      leftFirst[0] === rightFirst[0];
+
+    let nameStructureScore = 0;
+    if (sameLast && firstCompatible) nameStructureScore = 0.97;
+    else if (sameLast) nameStructureScore = 0.88;
+
+    return Math.max(similarity, nameStructureScore);
+  };
+
+  const sfPreferredSurgeonRosterEntry = (left, right) => {
+    const leftName = normalizeSfText(left?.name || "");
+    const rightName = normalizeSfText(right?.name || "");
+    const leftStartsDr = /^dr\.?\s+/i.test(leftName);
+    const rightStartsDr = /^dr\.?\s+/i.test(rightName);
+    if (leftStartsDr !== rightStartsDr) return leftStartsDr ? left : right;
+
+    const leftTokenCount = sfTokens(leftName).filter((token) => token !== "dr").length;
+    const rightTokenCount = sfTokens(rightName).filter((token) => token !== "dr").length;
+    if (leftTokenCount !== rightTokenCount) return leftTokenCount > rightTokenCount ? left : right;
+
+    return leftName.length >= rightName.length ? left : right;
+  };
+
+  const sfBestRosterSurgeonMatch = (facility = "", surgeonName = "") => {
+    const normalizedFacility = normalizeSfText(facility);
+    const normalizedSurgeon = normalizeSfText(surgeonName);
+    if (!normalizedFacility || !normalizedSurgeon) return null;
+
+    const candidates = surgeonRosters[normalizedFacility] || [];
+    const ranked = candidates
+      .map((surgeon) => ({ surgeon, score: sfSurgeonScore(surgeon?.name || "", normalizedSurgeon) }))
+      .filter((candidate) => candidate.score >= 0.9)
+      .sort((a, b) => b.score - a.score || (b.surgeon?.name || "").length - (a.surgeon?.name || "").length);
+
+    return ranked[0] || null;
+  };
+
+  const sfCanonicalSurgeonNameForFacility = (facility = "", surgeonName = "") => {
+    const match = sfBestRosterSurgeonMatch(facility, surgeonName);
+    return match?.surgeon?.name || normalizeSfText(surgeonName);
+  };
+
+  const sfCanonicalizeSurgeonForRow = (row) => {
+    const facility = normalizeSfText(row?.facility);
+    const surgeon = normalizeSfText(row?.surgeon);
+    if (!facility || !surgeon) return row;
+
+    const canonicalName = sfCanonicalSurgeonNameForFacility(facility, surgeon);
+    if (!canonicalName || canonicalName === surgeon) return row;
+
+    return {
+      ...row,
+      surgeon: canonicalName,
+      rosterSurgeonName: canonicalName,
+      rosterSurgeonSubspecialty: getSubspecialty(surgeonRosters, facility, canonicalName) || row.rosterSurgeonSubspecialty || row.category || "",
+      surgeonCanonicalizedFrom: surgeon,
+    };
+  };
+
+  const sfProcedureTokens = (value = "") =>
+    sfTokens(value).filter((token) => !["the", "and", "with", "without", "case", "procedure"].includes(token));
+
+  const sfProcedureScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeSfKey(leftValue);
+    const right = normalizeSfKey(rightValue);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+
+    const leftTokens = sfProcedureTokens(left);
+    const rightTokens = sfProcedureTokens(right);
+    if (!leftTokens.length || !rightTokens.length) return 0;
+
+    const leftSet = new Set(leftTokens);
+    const rightSet = new Set(rightTokens);
+    const intersection = leftTokens.filter((token) => rightSet.has(token)).length;
+    const smaller = Math.min(leftSet.size, rightSet.size);
+    const larger = Math.max(leftSet.size, rightSet.size);
+    const containment = smaller ? intersection / smaller : 0;
+    const jaccard = larger ? intersection / new Set([...leftTokens, ...rightTokens]).size : 0;
+
+    // If one saved procedure is a clean shorter version of the Salesforce phrase
+    // (ex: "Ventral" vs "Ventral Hernia IPOM"), treat it as a strong match so
+    // imports use the existing procedure label instead of creating a duplicate.
+    if (left.includes(right) || right.includes(left)) {
+      if (containment >= 1 && smaller >= 1) return 0.95;
+      return Math.max(0.88, jaccard);
+    }
+
+    // Shared specific words are useful, but do not let one generic word create a match.
+    if (containment >= 1 && smaller >= 2) return 0.9;
+    if (containment >= 0.75 && intersection >= 2) return 0.82;
+
+    return jaccard;
+  };
+
+  const sfPreferredProcedureName = (left = "", right = "") => {
+    const leftName = normalizeSfText(left);
+    const rightName = normalizeSfText(right);
+    if (!leftName) return rightName;
+    if (!rightName) return leftName;
+
+    const leftKey = normalizeSfKey(leftName);
+    const rightKey = normalizeSfKey(rightName);
+    if (leftKey === rightKey) return leftName.length <= rightName.length ? leftName : rightName;
+
+    // Prefer the existing clean/shorter procedure label when one contains the other.
+    if (leftKey.includes(rightKey) || rightKey.includes(leftKey)) {
+      return leftName.length <= rightName.length ? leftName : rightName;
+    }
+
+    return leftName;
+  };
+
+  const sfExistingProcedureCandidates = (facility = "", surgeon = "", specialty = "", sourceCasesByDate = casesByDate) => {
+    const normalizedFacility = normalizeSfText(facility);
+    const normalizedSurgeon = normalizeSfText(surgeon);
+    const normalizedSpecialty = normalizeProcedureSearch(specialty || getSurgeonSpecialty(surgeonRosters, normalizedFacility, normalizedSurgeon));
+
+    const counts = new Map();
+
+    Object.entries(sourceCasesByDate || {}).forEach(([, dateCases]) => {
+      (dateCases || []).forEach((item) => {
+        const procedure = normalizeSfText(item?.procedure);
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b" || isProcedureHiddenFromRoster(procedure)) return;
+
+        const itemSpecialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon));
+        const sameSpecialty = normalizedSpecialty && itemSpecialty && normalizedSpecialty === itemSpecialty;
+        const sameFacilitySurgeon =
+          normalizedFacility &&
+          normalizedSurgeon &&
+          normalizeSfText(item.facility) === normalizedFacility &&
+          sfSurgeonScore(item.surgeon, normalizedSurgeon) >= 0.9;
+
+        // Prefer procedures from the same specialty. If specialty is missing, fall back
+        // to same facility/surgeon so incomplete Salesforce snippets still canonicalize.
+        if (!sameSpecialty && !sameFacilitySurgeon) return;
+
+        const current = counts.get(procedure) || 0;
+        counts.set(procedure, current + 1);
+      });
+    });
+
+    return Array.from(counts.entries()).map(([procedure, count]) => ({ procedure, count }));
+  };
+
+  const sfBestExistingProcedureMatch = (procedure = "", facility = "", surgeon = "", specialty = "", sourceCasesByDate = casesByDate) => {
+    const normalizedProcedure = normalizeSfText(procedure);
+    if (!normalizedProcedure) return null;
+
+    const normalizedProcedureKey = normalizeSfKey(normalizedProcedure);
+
+    const candidates = sfExistingProcedureCandidates(facility, surgeon, specialty, sourceCasesByDate)
+      .map((candidate) => {
+        const candidateKey = normalizeSfKey(candidate.procedure);
+        return {
+          ...candidate,
+          candidateKey,
+          score: sfProcedureScore(candidate.procedure, normalizedProcedure),
+          isShorterContainedLabel:
+            candidateKey &&
+            candidateKey !== normalizedProcedureKey &&
+            candidateKey.length >= 4 &&
+            normalizedProcedureKey.includes(candidateKey),
+        };
+      })
+      .filter((candidate) => candidate.score >= 0.88)
+      .sort((a, b) => {
+        // Prefer the already-saved shorter label when Salesforce gives a longer
+        // variant of it, ex: saved "Ventral" vs SF "Ventral Hernia IPOM".
+        if (a.isShorterContainedLabel !== b.isShorterContainedLabel) return a.isShorterContainedLabel ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.count !== a.count) return b.count - a.count;
+        return a.procedure.length - b.procedure.length;
+      });
+
+    return candidates[0] || null;
+  };
+
+  const sfProcedureRosterMatchForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) return null;
+
+    const facility = normalizeSfText(row?.facility);
+    const surgeon = normalizeSfText(row?.surgeon);
+    const specialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category || getSurgeonSpecialty(surgeonRosters, facility, surgeon));
+    return sfBestExistingProcedureMatch(procedure, facility, surgeon, specialty, sourceCasesByDate);
+  };
+
+  const sfCanonicalProcedureNameForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) return "";
+    const match = sfProcedureRosterMatchForRow(row, sourceCasesByDate);
+    return match?.procedure || procedure;
+  };
+
+  const sfCanonicalizeProcedureForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) {
+      if (!row?.procedureRosterMatchedName && !row?.procedureCanonicalizedFrom) return row;
+      return { ...row, procedureRosterMatchedName: "", procedureCanonicalizedFrom: "" };
+    }
+
+    const match = sfProcedureRosterMatchForRow(row, sourceCasesByDate);
+    if (!match?.procedure) {
+      if (!row?.procedureRosterMatchedName && !row?.procedureCanonicalizedFrom) return row;
+      return { ...row, procedureRosterMatchedName: "", procedureCanonicalizedFrom: "" };
+    }
+
+    const canonicalProcedure = match.procedure;
+    const sameProcedure = normalizeProcedureSearch(canonicalProcedure) === normalizeProcedureSearch(procedure);
+
+    return {
+      ...row,
+      procedure: canonicalProcedure,
+      procedureRosterMatchedName: canonicalProcedure,
+      procedureCanonicalizedFrom: sameProcedure ? "" : procedure,
+    };
   };
 
   const sfTimeDifferenceMinutes = (left = "", right = "") => {
@@ -1054,6 +1379,105 @@ export default function ORPlannerApp() {
 
   const sfIsCompleted = (item) => normalizeSfKey(item.salesforceStatus) === "completed";
   const sfIsOnSite = (item) => normalizeSfKey(item.salesforceStatus) === "onsite";
+
+  const sfSurgeonFacilityOptions = (surgeonName = "") => {
+    const normalizedSurgeon = normalizeSurgeonSearch(surgeonName);
+    if (!normalizedSurgeon) return [];
+
+    return sortedFacilities.filter((facility) =>
+      (surgeonRosters[facility] || []).some((surgeon) => {
+        const rosterName = surgeon?.name || "";
+        const normalizedRosterName = normalizeSurgeonSearch(rosterName);
+        return (
+          normalizedRosterName === normalizedSurgeon ||
+          sfSurgeonScore(rosterName, surgeonName) >= 0.9
+        );
+      })
+    );
+  };
+
+  const sfFacilityFromRowOrSurgeon = (hospital = "", surgeonName = "") => {
+    const visibleFacility = normalizeSfText(hospital);
+    if (visibleFacility) {
+      return { facility: visibleFacility, facilityOptions: [], facilitySource: "salesforce" };
+    }
+
+    const options = sfSurgeonFacilityOptions(surgeonName);
+    if (options.length === 1) {
+      return { facility: options[0], facilityOptions: options, facilitySource: "surgeon_roster" };
+    }
+
+    if (options.length > 1) {
+      return { facility: "", facilityOptions: options, facilitySource: "surgeon_roster_multiple" };
+    }
+
+    return { facility: "", facilityOptions: [], facilitySource: "unknown" };
+  };
+
+  const sfSurgeonExistsInFacility = (facility = "", surgeonName = "") => {
+    return Boolean(sfBestRosterSurgeonMatch(facility, surgeonName));
+  };
+
+  const sfAddSurgeonToRosterFromRow = (row) => {
+    const facility = normalizeSfText(row?.facility);
+    const typedSurgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
+    if (!facility || !typedSurgeonName) return;
+
+    const existingMatch = sfBestRosterSurgeonMatch(facility, typedSurgeonName);
+    if (existingMatch?.surgeon?.name) {
+      const canonicalName = existingMatch.surgeon.name;
+      updateSalesforceRow(row.id, {
+        surgeon: canonicalName,
+        rosterSurgeonName: canonicalName,
+        rosterSurgeonSubspecialty: existingMatch.surgeon.subspecialty || row?.rosterSurgeonSubspecialty || row?.category || "",
+        surgeonCanonicalizedFrom: normalizeSfText(row?.surgeon),
+      });
+      setSfApplySummary(`Matched ${typedSurgeonName} to existing roster surgeon ${canonicalName}. No duplicate surgeon was added.`);
+      return;
+    }
+
+    const surgeonName = typedSurgeonName;
+    const subspecialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category);
+
+    setFacilities((prev) =>
+      prev.some((existing) => existing.toLowerCase() === facility.toLowerCase())
+        ? prev
+        : [...prev, facility].sort((a, b) => a.localeCompare(b))
+    );
+
+    setSurgeonRosters((prev) => {
+      const current = prev[facility] || [];
+      const existingIndex = current.findIndex((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(surgeonName));
+
+      if (existingIndex >= 0) {
+        const updatedRoster = current.map((surgeon, index) =>
+          index === existingIndex ? { ...surgeon, name: surgeonName, subspecialty } : surgeon
+        );
+
+        return {
+          ...prev,
+          [facility]: updatedRoster.sort((a, b) => a.name.localeCompare(b.name)),
+        };
+      }
+
+      return {
+        ...prev,
+        [facility]: [...current, { name: surgeonName, subspecialty }].sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    });
+
+    if (isGrowthSpecialty(subspecialty)) {
+      setGrowthSurgeons((prev) => (prev.includes(surgeonName) ? prev : [...prev, surgeonName]));
+    }
+
+    updateSalesforceRow(row.id, {
+      surgeon: surgeonName,
+      rosterSurgeonName: surgeonName,
+      rosterSurgeonSubspecialty: subspecialty,
+    });
+
+    setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster.`);
+  };
 
   const sfFlattenPlannerCases = () =>
     Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
@@ -1071,6 +1495,9 @@ export default function ORPlannerApp() {
     const procedureScore = sfSimilarityScore(sfCase.procedure, plannerCase.procedure);
     const timeDiff = sfTimeDifferenceMinutes(sfCase.time, plannerCase.time);
     const hasBothTimes = parseTimeToMinutes(sfCase.time) !== null && parseTimeToMinutes(plannerCase.time) !== null;
+    const identityMatches = facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5;
+    const timeIsTight = hasBothTimes && timeDiff !== null && timeDiff <= 15;
+    const timeIsReasonable = hasBothTimes && timeDiff !== null && timeDiff <= 30;
 
     let score = 25;
     const reasons = ["date"];
@@ -1081,10 +1508,10 @@ export default function ORPlannerApp() {
       reasons.push("fast tracked");
     }
 
-    if (hasBothTimes && timeDiff !== null && timeDiff <= 15) {
+    if (timeIsTight) {
       score += 25;
       reasons.push(timeDiff === 0 ? "exact time" : `time within ${timeDiff} min`);
-    } else if (hasBothTimes && timeDiff !== null && timeDiff <= 30) {
+    } else if (timeIsReasonable) {
       score += 12;
       reasons.push(`time within ${timeDiff} min`);
     } else if (!hasBothTimes) {
@@ -1101,12 +1528,18 @@ export default function ORPlannerApp() {
     score += procedureScore * 15;
 
     let status = "No Match";
+
+    // For Salesforce Account Procedure History snippets, time is often not visible.
+    // Date + facility + surgeon alone is not enough because one surgeon can have
+    // several procedures on the same day. Require procedure similarity for any
+    // possible/exact match. If procedure does not match, treat it as no match so
+    // the AI's suggested import/reconciliation action can be selected automatically.
     if (mode === "reconcile") {
-      if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && score >= 80) status = "Match";
-      else if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+      if (plannerCase.fastTracking && identityMatches && score >= 80) status = "Match";
+      else if (plannerCase.fastTracking && identityMatches && score >= 65) status = "Possible Match";
     } else {
-      if (facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && hasBothTimes && timeDiff !== null && timeDiff <= 15 && score >= 80) status = "Match";
-      else if (facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+      if (identityMatches && (timeIsTight || !hasBothTimes) && score >= 80) status = "Match";
+      else if (identityMatches && score >= 65) status = "Possible Match";
     }
 
     return { plannerCase, score: Math.round(score), status, reasons };
@@ -1273,15 +1706,22 @@ export default function ORPlannerApp() {
 
   const sfPrepareRows = (rows, screenshotType) =>
     rows.map((item, index) => {
-      const baseRow = {
+      const surgeon = normalizeSfText(item.surgeon);
+      const facilityResolution = sfFacilityFromRowOrSurgeon(item.hospital, surgeon);
+
+      const rawBaseRow = {
         id: `sf-row-${Date.now()}-${index}`,
         date: normalizeSfText(item.date),
         dateKey: sfDateToDateKey(item.date),
         time: normalizeSfText(item.time),
-        facility: normalizeSfText(item.hospital),
+        facility: facilityResolution.facility,
+        facilityOptions: facilityResolution.facilityOptions,
+        facilitySource: facilityResolution.facilitySource,
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
-        surgeon: normalizeSfText(item.surgeon),
+        surgeon,
+        rosterSurgeonName: surgeon,
+        rosterSurgeonSubspecialty: normalizeSfText(item.category),
         scheduledDate: normalizeSfText(item.scheduledDate),
         salesforceStatus: normalizeSfText(item.salesforceStatus),
         recommendedAction: normalizeSfText(item.recommendedAction),
@@ -1289,6 +1729,8 @@ export default function ORPlannerApp() {
         notes: normalizeSfText(item.notes),
         actionManuallyEdited: false,
       };
+
+      const baseRow = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawBaseRow));
 
       return {
         ...baseRow,
@@ -1334,15 +1776,26 @@ export default function ORPlannerApp() {
   const updateSalesforceRow = (id, patch) => {
     const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
     setSfExtractedCases((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              ...patch,
-              actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+
+        const rawPatched = {
+          ...item,
+          ...patch,
+          actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
+        };
+
+        const patched = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawPatched));
+
+        if (!patched.actionManuallyEdited) {
+          return {
+            ...patched,
+            ...sfResolveRowReviewState(patched, sfScreenshotType),
+          };
+        }
+
+        return patched;
+      })
     );
     setSfApplySummary("");
   };
@@ -1418,7 +1871,7 @@ export default function ORPlannerApp() {
               ...existingCase,
               fastTracking: item.action === "markReconciledOnly" ? Boolean(existingCase.fastTracking) : true,
               reconciled: item.action === "markReconciled" || item.action === "markReconciledOnly" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
-              notes: existingCase.notes || item.notes ? [existingCase.notes, item.notes ? `SF Import: ${item.notes}` : ""].filter(Boolean).join("\n") : existingCase.notes,
+              notes: existingCase.notes,
               salesforceImportedAt: now,
               salesforceStatus: item.salesforceStatus,
               salesforceScheduledDate: item.scheduledDate,
@@ -1431,15 +1884,16 @@ export default function ORPlannerApp() {
 
         if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(item.action)) {
           const facility = item.facility || sfAccountName || "";
+          const canonicalSurgeon = sfCanonicalSurgeonNameForFacility(facility, item.surgeon || "");
           const newCase = {
             ...blankCase(dateKey, facility),
             time: item.time || "",
-            surgeon: item.surgeon || "",
-            procedure: item.procedure || "",
+            surgeon: canonicalSurgeon || item.surgeon || "",
+            procedure: sfCanonicalProcedureNameForRow(item, next) || item.procedure || "",
             fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
             reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
-            growth: isAutoGrowthSurgeon(item.surgeon || ""),
-            notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
+            growth: isAutoGrowthSurgeon(canonicalSurgeon || item.surgeon || ""),
+            notes: "",
             salesforceImportedAt: now,
             salesforceStatus: item.salesforceStatus,
             salesforceScheduledDate: item.scheduledDate,
@@ -1470,6 +1924,86 @@ export default function ORPlannerApp() {
     setSfExtractedCases((prev) => prev.filter((item) => item.action === "review"));
     setSfApplySummary(`Applied ${importedCount + reconciledCount + fastTrackedCount + ignoredCount} row(s): ${importedCount} imported, ${reconciledCount} reconciled, ${fastTrackedCount} marked fast tracked, ${ignoredCount} ignored. ${skippedCount ? `${skippedCount} row(s) still need review or were skipped.` : ""}`.trim());
   };
+
+  useEffect(() => {
+    // Keep Salesforce imports from creating near-duplicate surgeon names like
+    // Avoid creating duplicate roster names when Salesforce omits Dr., uses initials, or varies first-name formatting.
+    // This also cleans up existing imported cases after the roster matching fix is installed.
+    setSurgeonRosters((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.entries(prev || {}).forEach(([facility, roster]) => {
+        const deduped = [];
+
+        (roster || []).forEach((surgeon) => {
+          const existingIndex = deduped.findIndex((candidate) => sfSurgeonScore(candidate?.name || "", surgeon?.name || "") >= 0.9);
+
+          if (existingIndex < 0) {
+            deduped.push(surgeon);
+            return;
+          }
+
+          changed = true;
+          const preferred = sfPreferredSurgeonRosterEntry(deduped[existingIndex], surgeon);
+          const other = preferred === deduped[existingIndex] ? surgeon : deduped[existingIndex];
+          deduped[existingIndex] = {
+            ...preferred,
+            subspecialty: preferred.subspecialty || other.subspecialty || "",
+          };
+        });
+
+        const sorted = deduped.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        if (sorted.length !== (roster || []).length || JSON.stringify(sorted) !== JSON.stringify(roster || [])) {
+          changed = true;
+          next[facility] = sorted;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+
+    setCasesByDate((prev) => {
+      let changed = false;
+      const next = {};
+
+      Object.entries(prev || {}).forEach(([dateKey, dateCases]) => {
+        next[dateKey] = (dateCases || []).map((item) => {
+          const canonicalSurgeon = sfCanonicalSurgeonNameForFacility(item.facility, item.surgeon);
+          const surgeonUpdatedItem = canonicalSurgeon && canonicalSurgeon !== item.surgeon
+            ? {
+                ...item,
+                surgeon: canonicalSurgeon,
+                growth: item.growth || isAutoGrowthSurgeon(canonicalSurgeon),
+              }
+            : item;
+
+          const procedureUpdatedItem = sfCanonicalizeProcedureForRow(surgeonUpdatedItem, prev);
+
+          if (procedureUpdatedItem !== item) {
+            changed = true;
+            return procedureUpdatedItem;
+          }
+
+          return item;
+        });
+      });
+
+      return changed ? next : prev;
+    });
+
+    setGrowthSurgeons((prev) => {
+      const canonical = prev.map((name) => {
+        for (const facility of sortedFacilities) {
+          const match = sfCanonicalSurgeonNameForFacility(facility, name);
+          if (match && match !== name) return match;
+        }
+        return name;
+      });
+      const unique = Array.from(new Set(canonical));
+      return JSON.stringify(unique) === JSON.stringify(prev) ? prev : unique;
+    });
+  }, [surgeonRosters]);
 
   const resetSalesforceImport = () => {
     setSfFile(null);
@@ -1828,24 +2362,117 @@ export default function ORPlannerApp() {
               </div>
             </div>
             {showRosterList && (
-              <div className="mt-3 rounded-2xl bg-slate-100 p-2">
+              <div className="mt-3 w-full min-w-0 overflow-hidden rounded-2xl bg-slate-100 p-2">
                 {selectedRoster.length === 0 ? (
                   <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No doctors saved for {rosterFacility} yet.</div>
                 ) : (
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {selectedRoster.map((surgeon) => (
-                      <div key={surgeon.name} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
-                        <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
-                        <span className="truncate">{surgeon.name}</span>
-                        {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
-                        {surgeon.subspecialty && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
-                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="ml-auto rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                      <div key={surgeon.name} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                        <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`shrink-0 rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
+                        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                          <span className="min-w-0 truncate whitespace-nowrap" title={surgeon.name}>{surgeon.name}</span>
+                          {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="hidden max-w-[35%] shrink truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={surgeon.facility}>{surgeon.facility}</span>}
+                          {surgeon.subspecialty && <span className="max-w-[42%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200" title={surgeon.subspecialty}>{surgeon.subspecialty}</span>}
+                        </div>
+                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
             )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+
+        <Card className="rounded-3xl shadow-sm">
+          <CardContent className={showProcedureRosterPanel ? "p-4" : "px-4 py-3"}>
+            {!showProcedureRosterPanel ? (
+              <div className="flex items-start justify-between gap-3 text-sm">
+                <div>
+                  <div className="font-bold leading-tight">Procedure Roster</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">{procedureRosterItems.length} saved procedures</div>
+                </div>
+                <button
+                  onClick={() => setShowProcedureRosterPanel(true)}
+                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Manage Procedures ▼
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-xl font-bold">Procedure Roster</h2>
+                      <button onClick={() => setShowProcedureRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Edit a name to rename matching existing cases; remove/hide one to keep it out of suggestions without deleting cases.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-start">
+                    <div className="space-y-2">
+                      <select value={procedureRosterSpecialty} onChange={(e) => setProcedureRosterSpecialty(e.target.value)} className="input">
+                        {procedureRosterSpecialties.map((specialty) => <option key={specialty}>{specialty}</option>)}
+                      </select>
+                      <button
+                        onClick={() => setShowProcedureList((prev) => !prev)}
+                        className="flex w-full items-center justify-between rounded-2xl bg-slate-100 px-3 py-2 text-left text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
+                      >
+                        <span>Procedures</span>
+                        <span className="text-slate-500">{selectedProcedureRosterItems.length} saved {showProcedureList ? "▲" : "▼"}</span>
+                      </button>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-800 ring-1 ring-blue-100">
+                      Use this to rename duplicates like “Ventral Hernia IPOM” to “Ventral,” or hide procedure names you do not want used for suggestions or Salesforce matching.
+                    </div>
+                  </div>
+                </div>
+                {showProcedureList && (
+                  <div className="mt-3 w-full min-w-0 overflow-hidden rounded-2xl bg-slate-100 p-2">
+                    {selectedProcedureRosterItems.length === 0 ? (
+                      <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No saved procedures found for this filter.</div>
+                    ) : (
+                      <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {selectedProcedureRosterItems.map((item) => {
+                          const itemKey = procedureRosterItemKey(item);
+                          const isEditing = editingProcedureRosterKey === itemKey;
+                          return (
+                            <div key={`${item.specialty}-${item.procedure}`} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                              {isEditing ? (
+                                <>
+                                  <input
+                                    value={editingProcedureName}
+                                    onChange={(e) => setEditingProcedureName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveProcedureRosterRename(item);
+                                      if (e.key === "Escape") cancelEditingProcedureFromRoster();
+                                    }}
+                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-200"
+                                    autoFocus
+                                  />
+                                  <button onClick={() => saveProcedureRosterRename(item)} className="shrink-0 rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">Save</button>
+                                  <button onClick={cancelEditingProcedureFromRoster} className="shrink-0 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-200">Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={item.procedure}>{item.procedure}</span>
+                                  <span className="hidden max-w-[35%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={item.specialty}>{item.specialty}</span>
+                                  <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count}x</span>
+                                  <button onClick={() => startEditingProcedureFromRoster(item)} className="shrink-0 rounded-xl bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-100 hover:bg-blue-100">Edit</button>
+                                  <button onClick={() => removeProcedureFromRoster(item.procedure)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${item.procedure}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </CardContent>
@@ -2187,7 +2814,6 @@ export default function ORPlannerApp() {
                           <div><span className="font-semibold">Facility:</span> {c.facility || "—"}</div>
                           <div><span className="font-semibold">Surgeon:</span> {c.surgeon || "—"}</div>
                           <div><span className="font-semibold">Procedure:</span> {c.procedure || "—"}</div>
-                          {c.notes && <div><span className="font-semibold">Notes:</span> {c.notes}</div>}
                         </div>
                       </button>
 
@@ -2318,7 +2944,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2l · desktop image zoom</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3b · always show procedure roster match</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2446,27 +3072,108 @@ export default function ORPlannerApp() {
                           <div className="mt-3 grid gap-2 md:grid-cols-2">
                             <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
                             <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
-                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
-                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
-                            <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
+                            <div>
+                              <span className="font-bold">Facility:</span> {item.facility || (item.facilityOptions?.length > 1 ? "Select below" : "—")}
+                              {item.facilitySource === "surgeon_roster" && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from surgeon roster</span>}
+                              {item.facilityOptions?.length > 1 && <span className="ml-2 rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-bold text-yellow-800">multiple affiliations</span>}
+                            </div>
+                            <div>
+                              <span className="font-bold">Surgeon:</span> {item.surgeon || "—"}
+                              {item.surgeonCanonicalizedFrom && item.surgeonCanonicalizedFrom !== item.surgeon && (
+                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched roster: {item.surgeonCanonicalizedFrom}</span>
+                              )}
+                            </div>
+                            <div className="md:col-span-2">
+                              <span className="font-bold">Procedure:</span> {item.procedure || "—"}
+                              {item.procedureRosterMatchedName && (
+                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched procedure roster: {item.procedureRosterMatchedName}</span>
+                              )}
+                              {item.procedureCanonicalizedFrom && item.procedureCanonicalizedFrom !== item.procedure && (
+                                <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from Salesforce: {item.procedureCanonicalizedFrom}</span>
+                              )}
+                            </div>
                             {(item.scheduledDate || item.salesforceStatus) && (
                               <div className="md:col-span-2">
                                 <span className="font-bold">Salesforce:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}
                               </div>
                             )}
-                            {item.recommendedAction && (
-                              <div className="md:col-span-2">
-                                <span className="font-bold">AI Action:</span> {item.recommendedAction}
-                              </div>
-                            )}
-                            {item.notes && (
-                              <div className="md:col-span-2 text-slate-500">
-                                <span className="font-bold">Notes:</span> {item.notes}
-                              </div>
-                            )}
                           </div>
 
                           <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
+                            {(item.facilityOptions?.length > 1 || !item.facility) && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Facility</span>
+                                <select
+                                  value={item.facility || ""}
+                                  onChange={(event) => updateSalesforceRow(item.id, { facility: event.target.value })}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Select facility</option>
+                                  {(item.facilityOptions?.length ? item.facilityOptions : sortedFacilities).map((facility) => (
+                                    <option key={`${item.id}-${facility}`} value={facility}>{facility}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+
+                            {(!item.surgeon || !item.procedure) && item.dateKey && (
+                              <div className="rounded-2xl bg-blue-50 p-3 text-xs text-blue-900 ring-1 ring-blue-100 md:col-span-2">
+                                <div className="font-bold">Incomplete Salesforce row</div>
+                                <div className="mt-1">
+                                  This row is missing {[
+                                    !item.surgeon ? "surgeon" : "",
+                                    !item.procedure ? "procedure" : "",
+                                  ].filter(Boolean).join(" and ")}. Select the facility and keep an import action selected if you want to add it as a placeholder case to investigate later.
+                                </div>
+                              </div>
+                            )}
+
+                            {item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon) && (
+                              <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-100 md:col-span-2">
+                                <div className="font-bold">Surgeon not in this facility roster</div>
+                                <div className="mt-1">
+                                  {item.surgeon} is not currently saved under {item.facility}. Confirm how you want the surgeon saved before applying.
+                                </div>
+
+                                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-amber-800">Save surgeon as</span>
+                                    <input
+                                      value={item.rosterSurgeonName || item.surgeon || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { rosterSurgeonName: event.target.value })}
+                                      className="input bg-white text-sm"
+                                      placeholder="Surgeon name for roster"
+                                    />
+                                  </label>
+
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-amber-800">Subspecialty</span>
+                                    <input
+                                      value={item.rosterSurgeonSubspecialty || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { rosterSurgeonSubspecialty: event.target.value })}
+                                      className="input bg-white text-sm"
+                                      placeholder="Ex: General Surgery"
+                                    />
+                                  </label>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => sfAddSurgeonToRosterFromRow(item)}
+                                    disabled={!normalizeSfText(item.rosterSurgeonName || item.surgeon)}
+                                    className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Add to roster
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {item.surgeon && !item.facility && (
+                              <div className="rounded-2xl bg-yellow-50 p-3 text-xs font-semibold text-yellow-900 ring-1 ring-yellow-100 md:col-span-2">
+                                Select a facility first, then you can add {item.surgeon} to that facility's surgeon roster.
+                              </div>
+                            )}
+
                             <label className="block">
                               <span className="mb-1 block text-xs font-bold text-slate-500">Review Action</span>
                               <select

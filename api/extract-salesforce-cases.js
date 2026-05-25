@@ -81,7 +81,9 @@ For Scheduled Procedures screenshots:
 - screenshotType should be "scheduled_procedures".
 
 Screenshot type 2: Account Procedure History List
-This usually has columns like:
+This may appear as a full Salesforce Account Procedure History page OR as a cropped/snipped portion of the Account Procedure History table.
+
+Full Account Procedure History screenshots usually have columns like:
 - Surgeon
 - Procedure Date
 - Product Family Type
@@ -90,16 +92,36 @@ This usually has columns like:
 - Scheduled
 - Status
 
-For Account Procedure History screenshots:
-- Use the account name from the breadcrumb/header as hospital when visible.
+Cropped/snipped Account Procedure History screenshots may not show the Salesforce page title, account name, or every column. They may only show rows with:
+- row number
+- checkbox
+- surgeon name
+- procedure date
+- product family type, often "da Vinci"
+- business category
+- procedure name
+- status
+
+If the screenshot looks like a cropped Salesforce table/list of procedure history rows, classify it as "account_procedure_history" even if the page title/header is not visible.
+
+For Account Procedure History screenshots and snippets:
+- Extract Surgeon into "surgeon".
 - Extract Procedure Date into "date".
 - Extract Business Category into "category".
 - Extract Procedure Name into "procedure".
-- Extract Surgeon into "surgeon".
-- Extract Scheduled column into "scheduledDate".
 - Extract Status column into "salesforceStatus".
+- Extract Scheduled column into "scheduledDate" ONLY if a distinct Scheduled column is visible.
+- If the Scheduled column is not visible in a crop/snippet, leave "scheduledDate" blank. Do not invent it.
+- If an account name/hospital/facility is visible in the screenshot header or breadcrumb, put it in "hospital" and "accountName".
+- If no account name/hospital/facility is visible, leave "hospital" blank and leave "accountName" blank. The OR Planner app will infer facility from the surgeon roster.
 - Time may be blank if no time column is visible.
 - screenshotType should be "account_procedure_history".
+
+Very important column rule:
+- Product Family Type values like "da Vinci" are NOT the hospital/facility.
+- Product Family Type values like "da Vinci" are NOT the category.
+- Product Family Type values like "da Vinci" are NOT the Scheduled date.
+- Ignore the Product Family Type column completely.
 
 Account Procedure History business rules:
 - The Scheduled column controls OR Planner fastTracking. A date in the Scheduled column means fastTracking true/already scheduled in OR Planner. A blank Scheduled column means fastTracking false/not fast tracked.
@@ -111,24 +133,26 @@ Recommended action rules for Account Procedure History:
 - If scheduledDate has a visible date AND salesforceStatus is "OnSite", set recommendedAction to "already_fast_tracked_do_not_duplicate".
   Notes should say: "Scheduled column has a date. Already fast tracked but not reconciled. Do not import duplicate."
 - If scheduledDate is blank AND salesforceStatus is "Completed", set recommendedAction to "import_new_not_fast_tracked_reconciled".
-  Notes should say: "No Scheduled date means this was not fast tracked. Completed in Salesforce means reconciled true. If added to OR Planner, set fastTracking false and reconciled true."
+  Notes should say: "No visible Scheduled date means this was not confirmed as fast tracked. Completed in Salesforce means reconciled true. If added to OR Planner, set fastTracking false and reconciled true."
 - If scheduledDate is blank AND salesforceStatus is "OnSite", set recommendedAction to "import_new_not_fast_tracked_unreconciled".
-  Notes should say: "No Scheduled date means this was not fast tracked. OnSite in Salesforce means reconciled false. If added to OR Planner, set fastTracking false and reconciled false."
+  Notes should say: "No visible Scheduled date means this was not confirmed as fast tracked. OnSite in Salesforce means reconciled false. If added to OR Planner, set fastTracking false and reconciled false."
 - If status is unclear and scheduledDate is blank, set recommendedAction to "needs_review".
 
 General extraction rules:
-- Extract every visible table row from Salesforce desktop/table screenshots.
+- Extract every visible case row from Salesforce desktop/table screenshots.
 - Extract every visible case card/list item from Salesforce mobile/card screenshots.
 - Read rows from top to bottom.
 - Do not merge two rows together.
 - Do not invent missing information.
+- If a row is mostly blank or lacks both surgeon and procedure, skip that row.
+- If a visible row has date, surgeon, procedure, and status, extract it even if facility/hospital is blank.
 - If a cell is unclear, leave it blank and set confidence to "Low".
 - If most of the row is readable but one cell is uncertain, set confidence to "Medium".
 - If the full row is clear, set confidence to "High".
 - Preserve hospital/account names exactly as shown.
 - Preserve procedure names exactly as shown.
 - Preserve surgeon names exactly as shown.
-- Ignore Salesforce navigation, sidebars, browser UI, bottom mobile navigation, filters, sort controls, and non-case text.
+- Ignore Salesforce navigation, sidebars, browser UI, bottom mobile navigation, filters, sort controls, row numbers, checkboxes, and non-case text.
 - If no rows are visible, return { "screenshotType": "unknown", "accountName": "", "cases": [] }.
 `.trim();
 
