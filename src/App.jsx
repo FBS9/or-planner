@@ -298,6 +298,7 @@ export default function ORPlannerApp() {
   const lastAutoCloudPullAtRef = useRef(0);
   const autoCloudSyncInFlightRef = useRef(false);
   const lastLocalEditAtRef = useRef(0);
+  const localDirtyRef = useRef(false);
   const lastCloudCheckAtRef = useRef(0);
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
@@ -511,16 +512,31 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     const nextSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
-    const previousSnapshotString = latestLocalCloudSnapshotRef.current;
     latestLocalCloudSnapshotRef.current = nextSnapshotString;
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
-    // Only mark this device as locally edited when the user/app changed data,
-    // not when we are applying data that came from Supabase. This prevents a
-    // stale phone from repeatedly pushing old data back over a newer desktop save.
-    if (autoCloudReady && !isApplyingCloudRef.current && previousSnapshotString && nextSnapshotString !== previousSnapshotString) {
+  useEffect(() => {
+    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+
+    const markLocalDirty = (event) => {
+      if (isApplyingCloudRef.current) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-cloud-sync-ignore="true"]')) return;
+      localDirtyRef.current = true;
       lastLocalEditAtRef.current = Date.now();
-    }
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady]);
+    };
+
+    document.addEventListener("input", markLocalDirty, true);
+    document.addEventListener("change", markLocalDirty, true);
+    document.addEventListener("click", markLocalDirty, true);
+
+    return () => {
+      document.removeEventListener("input", markLocalDirty, true);
+      document.removeEventListener("change", markLocalDirty, true);
+      document.removeEventListener("click", markLocalDirty, true);
+    };
+  }, [plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -568,6 +584,7 @@ export default function ORPlannerApp() {
     lastSavedSnapshotRef.current = "";
     latestLocalCloudSnapshotRef.current = "";
     lastCloudUpdatedAtRef.current = "";
+    localDirtyRef.current = false;
     setCloudStatus("Signed out of cloud sync.");
   };
 
@@ -639,6 +656,7 @@ export default function ORPlannerApp() {
     lastSavedSnapshotRef.current = pulledSnapshotString;
     latestLocalCloudSnapshotRef.current = pulledSnapshotString;
     lastCloudUpdatedAtRef.current = updatedAt || new Date().toISOString();
+    localDirtyRef.current = false;
     window.setTimeout(() => {
       isApplyingCloudRef.current = false;
       setAutoCloudReady(true);
@@ -679,6 +697,7 @@ export default function ORPlannerApp() {
     lastSavedSnapshotRef.current = snapshotString;
     latestLocalCloudSnapshotRef.current = snapshotString;
     lastCloudUpdatedAtRef.current = savedAt;
+    localDirtyRef.current = false;
     const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
     setCloudSyncActivity("Saved");
     setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
@@ -747,7 +766,7 @@ export default function ORPlannerApp() {
           const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
           const incomingSnapshotString = snapshotToCloudComparableString(incoming.planner_data);
           const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-          const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 5000;
+          const localEditIsFresh = localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000;
 
           // Do not rely on device timestamps here. Phones/desktops can have slightly
           // different clocks, which can make a newer desktop save look "older" to the
@@ -785,7 +804,7 @@ export default function ORPlannerApp() {
       try {
         const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
         const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-        const localEditIsFresh = Date.now() - lastLocalEditAtRef.current < 5000;
+        const localEditIsFresh = localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000;
 
         setCloudSyncActivity("Checking cloud...");
         const { data, error } = await getCloudRecord();
@@ -807,6 +826,9 @@ export default function ORPlannerApp() {
           // source of truth. If this device has a fresh local edit, save it. Otherwise,
           // pull the cloud snapshot so desktop changes appear on mobile automatically.
           if (cloudDiffersFromLocal) {
+            // Only let this device push local data when it has a truly fresh edit.
+            // If the phone is idle, stale, or just holding old local data, pull cloud instead.
+            // This makes desktop changes appear on mobile without needing Sync Now.
             if (hasUnsavedLocalWork && localEditIsFresh) {
               setCloudSyncActivity("Auto-saving...");
               await performCloudSave({ silent: true });
@@ -814,7 +836,7 @@ export default function ORPlannerApp() {
             }
 
             applyCloudPlannerData(data.planner_data, data.updated_at, "Synced");
-            setCloudStatus(`Auto-synced latest cloud data at ${new Date().toLocaleTimeString()}.`);
+            setCloudStatus(`Auto-pulled latest cloud data at ${new Date().toLocaleTimeString()}.`);
             return;
           }
 
@@ -825,7 +847,7 @@ export default function ORPlannerApp() {
           return;
         }
 
-        if (hasUnsavedLocalWork) {
+        if (hasUnsavedLocalWork && localEditIsFresh) {
           setCloudSyncActivity("Auto-saving...");
           await performCloudSave({ silent: true });
         } else {
@@ -3356,7 +3378,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3q · mobile pull-first cloud sync</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3s · idle mobile auto-pull sync</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
