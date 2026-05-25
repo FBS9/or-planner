@@ -272,6 +272,8 @@ export default function ORPlannerApp() {
   const [showProcedureList, setShowProcedureList] = useState(false);
   const [procedureRosterSpecialty, setProcedureRosterSpecialty] = useState(ALL_PROCEDURE_SPECIALTIES);
   const [procedureExclusions, setProcedureExclusions] = useState([]);
+  const [editingProcedureRosterKey, setEditingProcedureRosterKey] = useState("");
+  const [editingProcedureName, setEditingProcedureName] = useState("");
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
   const [weekStartDay, setWeekStartDay] = useState("Sunday");
   const [showWeekSettings, setShowWeekSettings] = useState(false);
@@ -953,6 +955,49 @@ export default function ORPlannerApp() {
       if (existing.has(key)) return prev;
       return [...(prev || []), cleanProcedure];
     });
+  };
+
+  const procedureRosterItemKey = (item) => `${normalizeProcedureSearch(item?.specialty || "Unassigned")}::${normalizeProcedureSearch(item?.procedure || "")}`;
+
+  const startEditingProcedureFromRoster = (item) => {
+    setEditingProcedureRosterKey(procedureRosterItemKey(item));
+    setEditingProcedureName(item?.procedure || "");
+  };
+
+  const cancelEditingProcedureFromRoster = () => {
+    setEditingProcedureRosterKey("");
+    setEditingProcedureName("");
+  };
+
+  const saveProcedureRosterRename = (item) => {
+    const oldProcedure = (item?.procedure || "").trim();
+    const newProcedure = editingProcedureName.trim();
+    const specialty = item?.specialty || "Unassigned";
+    if (!oldProcedure || !newProcedure) return;
+    if (normalizeProcedureSearch(oldProcedure) === normalizeProcedureSearch(newProcedure)) {
+      cancelEditingProcedureFromRoster();
+      return;
+    }
+
+    const confirmed = window.confirm(`Rename procedure "${oldProcedure}" to "${newProcedure}" for ${specialty}? Existing cases using this saved procedure will be updated. Nothing will be deleted.`);
+    if (!confirmed) return;
+
+    setCasesByDate((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([dateKey, cases]) => {
+        next[dateKey] = (cases || []).map((caseItem) => {
+          const caseProcedure = (caseItem.procedure || "").trim();
+          if (normalizeProcedureSearch(caseProcedure) !== normalizeProcedureSearch(oldProcedure)) return caseItem;
+          const caseSpecialty = getSurgeonSpecialty(surgeonRosters, caseItem.facility, caseItem.surgeon) || "Unassigned";
+          if (specialty !== ALL_PROCEDURE_SPECIALTIES && normalizeProcedureSearch(caseSpecialty) !== normalizeProcedureSearch(specialty)) return caseItem;
+          return { ...caseItem, procedure: newProcedure };
+        });
+      });
+      return next;
+    });
+
+    setProcedureExclusions((prev) => (prev || []).filter((entry) => normalizeProcedureSearch(typeof entry === "string" ? entry : entry?.procedure) !== normalizeProcedureSearch(newProcedure)));
+    cancelEditingProcedureFromRoster();
   };
 
   const toggleGrowthSurgeon = (surgeon) => {
@@ -2351,7 +2396,7 @@ export default function ORPlannerApp() {
                       <h2 className="text-xl font-bold">Procedure Roster</h2>
                       <button onClick={() => setShowProcedureRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
                     </div>
-                    <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Removing one hides it from suggestions; it does not delete existing cases.</p>
+                    <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Edit a name to rename matching existing cases; remove/hide one to keep it out of suggestions without deleting cases.</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-start">
                     <div className="space-y-2">
@@ -2367,7 +2412,7 @@ export default function ORPlannerApp() {
                       </button>
                     </div>
                     <div className="rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-800 ring-1 ring-blue-100">
-                      Use this to remove duplicates like “Ventral Hernia IPOM” when you already want Salesforce and manual entry to use “Ventral.”
+                      Use this to rename duplicates like “Ventral Hernia IPOM” to “Ventral,” or hide procedure names you do not want used for suggestions or Salesforce matching.
                     </div>
                   </div>
                 </div>
@@ -2377,14 +2422,38 @@ export default function ORPlannerApp() {
                       <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No saved procedures found for this filter.</div>
                     ) : (
                       <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                        {selectedProcedureRosterItems.map((item) => (
-                          <div key={`${item.specialty}-${item.procedure}`} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
-                            <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={item.procedure}>{item.procedure}</span>
-                            <span className="hidden max-w-[35%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={item.specialty}>{item.specialty}</span>
-                            <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count}x</span>
-                            <button onClick={() => removeProcedureFromRoster(item.procedure)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${item.procedure}`}><Trash2 className="h-3.5 w-3.5" /></button>
-                          </div>
-                        ))}
+                        {selectedProcedureRosterItems.map((item) => {
+                          const itemKey = procedureRosterItemKey(item);
+                          const isEditing = editingProcedureRosterKey === itemKey;
+                          return (
+                            <div key={`${item.specialty}-${item.procedure}`} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                              {isEditing ? (
+                                <>
+                                  <input
+                                    value={editingProcedureName}
+                                    onChange={(e) => setEditingProcedureName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveProcedureRosterRename(item);
+                                      if (e.key === "Escape") cancelEditingProcedureFromRoster();
+                                    }}
+                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-200"
+                                    autoFocus
+                                  />
+                                  <button onClick={() => saveProcedureRosterRename(item)} className="shrink-0 rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">Save</button>
+                                  <button onClick={cancelEditingProcedureFromRoster} className="shrink-0 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-200">Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={item.procedure}>{item.procedure}</span>
+                                  <span className="hidden max-w-[35%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={item.specialty}>{item.specialty}</span>
+                                  <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count}x</span>
+                                  <button onClick={() => startEditingProcedureFromRoster(item)} className="shrink-0 rounded-xl bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-100 hover:bg-blue-100">Edit</button>
+                                  <button onClick={() => removeProcedureFromRoster(item.procedure)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${item.procedure}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2860,7 +2929,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2y · procedure roster management</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2z · editable procedure roster</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
