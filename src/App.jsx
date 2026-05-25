@@ -292,6 +292,8 @@ export default function ORPlannerApp() {
   const [autoCloudReady, setAutoCloudReady] = useState(false);
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
   const lastSavedSnapshotRef = useRef("");
+  const latestLocalCloudSnapshotRef = useRef("");
+  const lastCloudUpdatedAtRef = useRef("");
   const isApplyingCloudRef = useRef(false);
   const lastAutoCloudPullAtRef = useRef(0);
   const autoCloudSyncInFlightRef = useRef(false);
@@ -505,6 +507,11 @@ export default function ORPlannerApp() {
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
+    if (!plannerLoaded) return;
+    latestLocalCloudSnapshotRef.current = snapshotToCloudComparableString(getPlannerSnapshot());
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
+
+  useEffect(() => {
     if (!supabase) return;
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
@@ -548,6 +555,8 @@ export default function ORPlannerApp() {
     setCloudSession(null);
     setAutoCloudReady(false);
     lastSavedSnapshotRef.current = "";
+    latestLocalCloudSnapshotRef.current = "";
+    lastCloudUpdatedAtRef.current = "";
     setCloudStatus("Signed out of cloud sync.");
   };
 
@@ -557,13 +566,49 @@ export default function ORPlannerApp() {
   // currently selected date. Mobile and desktop can legitimately be viewing
   // different days, and that should not make one device think it has unsaved
   // local changes and overwrite the other device's newer cloud data.
+  const sortStringArray = (values = []) => Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
+
+  const normalizeSurgeonRostersForCloudCompare = (rosters = {}) => {
+    const normalized = {};
+    Object.keys(rosters || {}).sort((a, b) => a.localeCompare(b)).forEach((facility) => {
+      normalized[facility] = (Array.isArray(rosters[facility]) ? rosters[facility] : [])
+        .map((surgeon) => ({
+          name: surgeon?.name || "",
+          subspecialty: surgeon?.subspecialty || "",
+        }))
+        .filter((surgeon) => surgeon.name)
+        .sort((a, b) => `${a.name}|${a.subspecialty}`.localeCompare(`${b.name}|${b.subspecialty}`));
+    });
+    return normalized;
+  };
+
+  const normalizeCasesByDateForCloudCompare = (cases = {}) => {
+    const normalized = {};
+    Object.keys(cases || {}).sort((a, b) => a.localeCompare(b)).forEach((dateKey) => {
+      normalized[dateKey] = (Array.isArray(cases[dateKey]) ? cases[dateKey] : [])
+        .map((item) => ({
+          id: item?.id || "",
+          date: item?.date || dateKey,
+          facility: item?.facility || "",
+          surgeon: item?.surgeon || "",
+          procedure: item?.procedure || "",
+          notes: item?.notes || "",
+          fastTracking: Boolean(item?.fastTracking),
+          reconciled: Boolean(item?.reconciled),
+          growth: Boolean(item?.growth),
+        }))
+        .sort((a, b) => `${a.date}|${a.facility}|${a.surgeon}|${a.procedure}|${a.id}`.localeCompare(`${b.date}|${b.facility}|${b.surgeon}|${b.procedure}|${b.id}`));
+    });
+    return normalized;
+  };
+
   const snapshotToCloudComparableString = (snapshot = {}) => JSON.stringify({
     plannerTitle: snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner",
-    casesByDate: snapshot.casesByDate || {},
-    facilities: Array.isArray(snapshot.facilities) ? [...snapshot.facilities].sort((a, b) => a.localeCompare(b)) : [],
-    surgeonRosters: snapshot.surgeonRosters || {},
-    procedureExclusions: Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : [],
-    growthSurgeons: Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : [],
+    casesByDate: normalizeCasesByDateForCloudCompare(snapshot.casesByDate || {}),
+    facilities: sortStringArray(snapshot.facilities),
+    surgeonRosters: normalizeSurgeonRostersForCloudCompare(snapshot.surgeonRosters || {}),
+    procedureExclusions: sortStringArray(snapshot.procedureExclusions),
+    growthSurgeons: sortStringArray(snapshot.growthSurgeons),
     weekStartDay: snapshot.weekStartDay || "Sunday",
   });
 
@@ -583,10 +628,11 @@ export default function ORPlannerApp() {
 
     if (!silent) setCloudBusy(true);
     setCloudSyncActivity("Saving...");
+    const savedAt = new Date().toISOString();
     const { error } = await supabase.from("or_planner_sync").upsert({
       user_id: cloudSession.user.id,
       planner_data: snapshot,
-      updated_at: new Date().toISOString(),
+      updated_at: savedAt,
     }, { onConflict: "user_id" });
     if (!silent) setCloudBusy(false);
 
@@ -597,6 +643,8 @@ export default function ORPlannerApp() {
     }
 
     lastSavedSnapshotRef.current = snapshotString;
+    latestLocalCloudSnapshotRef.current = snapshotString;
+    lastCloudUpdatedAtRef.current = savedAt;
     const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
     setCloudSyncActivity("Saved");
     setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
@@ -637,7 +685,10 @@ export default function ORPlannerApp() {
 
     isApplyingCloudRef.current = true;
     applyPlannerSnapshot(data.planner_data);
-    lastSavedSnapshotRef.current = snapshotToCloudComparableString(data.planner_data);
+    const pulledSnapshotString = snapshotToCloudComparableString(data.planner_data);
+    lastSavedSnapshotRef.current = pulledSnapshotString;
+    latestLocalCloudSnapshotRef.current = pulledSnapshotString;
+    lastCloudUpdatedAtRef.current = data.updated_at || new Date().toISOString();
     window.setTimeout(() => {
       isApplyingCloudRef.current = false;
       setAutoCloudReady(true);
@@ -660,6 +711,47 @@ export default function ORPlannerApp() {
     lastAutoCloudPullAtRef.current = Date.now();
     performCloudPull({ silent: true });
   }, [plannerLoaded, cloudSession?.user?.id]);
+
+  useEffect(() => {
+    if (!supabase || !plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+
+    const userId = cloudSession.user.id;
+    const channel = supabase
+      .channel(`or-planner-sync-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "or_planner_sync", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const incoming = payload?.new;
+          if (!incoming?.planner_data) return;
+
+          const incomingSnapshotString = snapshotToCloudComparableString(incoming.planner_data);
+          if (incomingSnapshotString === lastSavedSnapshotRef.current) return;
+
+          // Only auto-apply pushed cloud updates when this device has no unsaved local work.
+          // This gives phones a push-style update when desktop saves, while protecting
+          // anything the phone is actively editing.
+          if (latestLocalCloudSnapshotRef.current !== lastSavedSnapshotRef.current) return;
+
+          isApplyingCloudRef.current = true;
+          setCloudSyncActivity("Live sync...");
+          applyPlannerSnapshot(incoming.planner_data);
+          lastSavedSnapshotRef.current = incomingSnapshotString;
+          latestLocalCloudSnapshotRef.current = incomingSnapshotString;
+          lastCloudUpdatedAtRef.current = incoming.updated_at || new Date().toISOString();
+          window.setTimeout(() => {
+            isApplyingCloudRef.current = false;
+            setCloudSyncActivity("Synced");
+            setCloudStatus(`Live-synced cloud data at ${new Date().toLocaleTimeString()}.`);
+          }, 0);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
@@ -3212,7 +3304,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3n · fixed cloud sync compare</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3o · push + poll cloud sync</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
