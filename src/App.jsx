@@ -1249,6 +1249,49 @@ export default function ORPlannerApp() {
     return intersection / union;
   };
 
+  const sfFacilityTokens = (value = "") =>
+    sfTokens(value).filter((token) => !["hospital", "medical", "center", "regional", "general", "the", "of", "and"].includes(token));
+
+  const sfFacilityScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeSfKey(leftValue);
+    const right = normalizeSfKey(rightValue);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+
+    const leftCompact = left.replace(/\s+/g, "");
+    const rightCompact = right.replace(/\s+/g, "");
+    if (leftCompact === rightCompact) return 1;
+    if (leftCompact.includes(rightCompact) || rightCompact.includes(leftCompact)) return 0.96;
+
+    const leftTokens = new Set(sfFacilityTokens(left));
+    const rightTokens = new Set(sfFacilityTokens(right));
+    if (!leftTokens.size || !rightTokens.size) return sfSimilarityScore(left, right);
+
+    const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    const coverage = intersection / Math.min(leftTokens.size, rightTokens.size);
+    const jaccard = intersection / new Set([...leftTokens, ...rightTokens]).size;
+
+    return Math.max(sfSimilarityScore(left, right), coverage >= 1 ? 0.97 : jaccard);
+  };
+
+  const sfBestFacilityMatch = (facilityName = "") => {
+    const visibleFacility = normalizeSfText(facilityName);
+    if (!visibleFacility) return null;
+
+    const ranked = sortedFacilities
+      .map((facility) => ({ facility, score: sfFacilityScore(facility, visibleFacility) }))
+      .filter((candidate) => candidate.score >= 0.86)
+      .sort((a, b) => b.score - a.score || b.facility.length - a.facility.length);
+
+    return ranked[0] || null;
+  };
+
+  const sfCanonicalFacilityName = (facilityName = "") => {
+    const visibleFacility = normalizeSfText(facilityName);
+    const match = sfBestFacilityMatch(visibleFacility);
+    return match?.facility || visibleFacility;
+  };
+
   const sfSurgeonScore = (left = "", right = "") => {
     const similarity = sfSimilarityScore(left, right);
     const leftTokens = sfTokens(left).filter((token) => token !== "dr");
@@ -1258,6 +1301,7 @@ export default function ORPlannerApp() {
     const leftFirst = leftTokens[0] || "";
     const rightFirst = rightTokens[0] || "";
     const sameLast = leftLast && rightLast && leftLast === rightLast;
+    const rosterUsesLastNameOnly = leftTokens.length === 1 || rightTokens.length === 1;
     const firstCompatible =
       !leftFirst ||
       !rightFirst ||
@@ -1266,6 +1310,7 @@ export default function ORPlannerApp() {
 
     let nameStructureScore = 0;
     if (sameLast && firstCompatible) nameStructureScore = 0.97;
+    else if (sameLast && rosterUsesLastNameOnly) nameStructureScore = 0.94;
     else if (sameLast) nameStructureScore = 0.88;
 
     return Math.max(similarity, nameStructureScore);
@@ -1510,7 +1555,13 @@ export default function ORPlannerApp() {
   const sfFacilityFromRowOrSurgeon = (hospital = "", surgeonName = "") => {
     const visibleFacility = normalizeSfText(hospital);
     if (visibleFacility) {
-      return { facility: visibleFacility, facilityOptions: [], facilitySource: "salesforce" };
+      const canonicalFacility = sfCanonicalFacilityName(visibleFacility);
+      return {
+        facility: canonicalFacility,
+        facilityOptions: [],
+        facilitySource: canonicalFacility !== visibleFacility ? "matched_facility_roster" : "salesforce",
+        facilityCanonicalizedFrom: canonicalFacility !== visibleFacility ? visibleFacility : "",
+      };
     }
 
     const options = sfSurgeonFacilityOptions(surgeonName);
@@ -1828,6 +1879,7 @@ export default function ORPlannerApp() {
         facility: facilityResolution.facility,
         facilityOptions: facilityResolution.facilityOptions,
         facilitySource: facilityResolution.facilitySource,
+        facilityCanonicalizedFrom: facilityResolution.facilityCanonicalizedFrom || "",
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
         surgeon,
@@ -3104,7 +3156,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3g · true top-right roster collapse</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3i · facility + last-name roster matching</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3235,6 +3287,7 @@ export default function ORPlannerApp() {
                             <div>
                               <span className="font-bold">Facility:</span> {item.facility || (item.facilityOptions?.length > 1 ? "Select below" : "—")}
                               {item.facilitySource === "surgeon_roster" && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from surgeon roster</span>}
+                              {item.facilitySource === "matched_facility_roster" && item.facilityCanonicalizedFrom && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">matched facility roster: {item.facilityCanonicalizedFrom}</span>}
                               {item.facilityOptions?.length > 1 && <span className="ml-2 rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-bold text-yellow-800">multiple affiliations</span>}
                             </div>
                             <div>
