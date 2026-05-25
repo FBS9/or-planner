@@ -2460,11 +2460,13 @@ export default function ORPlannerApp() {
               <>
             <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-xl font-bold">Surgeon Rosters</h2>
-                  <button onClick={() => setShowSurgeonRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold">Surgeon Rosters</h2>
+                    <p className="mt-1 text-sm text-slate-500">Add doctors under each saved facility. Surgery rows will then show those names in the surgeon dropdown for that facility.</p>
+                  </div>
+                  <button onClick={() => setShowSurgeonRosterPanel(false)} className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Add doctors under each saved facility. Surgery rows will then show those names in the surgeon dropdown for that facility.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
                 <div className="space-y-2">
@@ -2571,11 +2573,13 @@ export default function ORPlannerApp() {
               <>
                 <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
                   <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xl font-bold">Procedure Roster</h2>
-                      <button onClick={() => setShowProcedureRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h2 className="text-xl font-bold">Procedure Roster</h2>
+                        <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Edit a name to rename matching existing cases; remove/hide one to keep it out of suggestions without deleting cases.</p>
+                      </div>
+                      <button onClick={() => setShowProcedureRosterPanel(false)} className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
                     </div>
-                    <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Edit a name to rename matching existing cases; remove/hide one to keep it out of suggestions without deleting cases.</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-start">
                     <div className="space-y-2">
