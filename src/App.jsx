@@ -2317,9 +2317,9 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2j · mobile image reference</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2k · compact sticky reference</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The screenshot stays visible while you review. On mobile, use the floating image button while scrolling.
+                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. On mobile, use the floating image button while scrolling.
                 </p>
               </div>
 
@@ -2342,11 +2342,11 @@ export default function ORPlannerApp() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-              <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
-                <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-                  <div className="rounded-3xl bg-blue-50 p-4 ring-1 ring-blue-100">
-                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-5 text-center text-sm font-bold text-blue-800 transition hover:bg-blue-50">
-                      <Upload className="mb-2 h-6 w-6" />
+              <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
+                <div className="space-y-3 lg:sticky lg:top-3 lg:max-h-[calc(88vh-120px)] lg:self-start lg:overflow-y-auto lg:pr-1">
+                  <div className="rounded-3xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-3 text-center text-sm font-bold text-blue-800 transition hover:bg-blue-50">
+                      <Upload className="mb-1 h-5 w-5" />
                       <span className="max-w-full break-words">{sfFile ? sfFile.name : "Upload Salesforce screenshot"}</span>
                       <span className="mt-1 text-xs font-medium text-blue-500">PNG, JPG, JPEG, or WEBP</span>
                       <input
@@ -2362,7 +2362,7 @@ export default function ORPlannerApp() {
                         <img
                           src={sfPreviewUrl}
                           alt="Salesforce screenshot preview"
-                          className="max-h-64 w-full rounded-xl object-contain lg:max-h-[52vh]"
+                          className="max-h-44 w-full rounded-xl object-contain lg:max-h-[34vh]"
                         />
                         <div className="mt-2 text-center text-[11px] font-semibold text-slate-400">
                           Reference image stays pinned on desktop; mobile gets a floating viewer
@@ -2374,7 +2374,7 @@ export default function ORPlannerApp() {
                       type="button"
                       onClick={extractSalesforceCases}
                       disabled={!sfFile || sfLoading}
-                      className="mt-4 w-full rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                      className="mt-3 w-full rounded-2xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50"
                     >
                       {sfLoading ? "Extracting with AI..." : "Extract Cases with AI"}
                     </button>
@@ -2387,7 +2387,7 @@ export default function ORPlannerApp() {
                   </div>
 
                   {(sfScreenshotType || sfExtractedCases.length > 0) && (
-                    <div className="rounded-3xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+                    <div className="rounded-3xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
                       <div className="font-bold text-slate-900">Extraction Result</div>
                       <div className="mt-2">Type: <span className="font-semibold">{sfScreenshotType || "unknown"}</span></div>
                       {sfAccountName && <div>Account: <span className="font-semibold">{sfAccountName}</span></div>}
@@ -2399,14 +2399,14 @@ export default function ORPlannerApp() {
                     <button
                       type="button"
                       onClick={applySalesforceRowsToPlanner}
-                      className="w-full rounded-2xl bg-green-700 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-green-800"
+                      className="w-full rounded-2xl bg-green-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-green-800"
                     >
                       Apply Reviewed Rows to OR Planner
                     </button>
                   )}
 
                   {sfApplySummary && (
-                    <div className="rounded-3xl bg-green-50 p-4 text-sm font-semibold text-green-800 ring-1 ring-green-100">
+                    <div className="rounded-3xl bg-green-50 p-3 text-sm font-semibold text-green-800 ring-1 ring-green-100">
                       {sfApplySummary}
                     </div>
                   )}
