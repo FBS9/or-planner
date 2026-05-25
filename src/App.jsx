@@ -261,11 +261,16 @@ export default function ORPlannerApp() {
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
   const [newFacilityName, setNewFacilityName] = useState("");
+  const [editingFacilityName, setEditingFacilityName] = useState("");
+  const [editingFacilityOriginal, setEditingFacilityOriginal] = useState("");
   const [showFacilitiesPanel, setShowFacilitiesPanel] = useState(false);
   const [surgeonRosters, setSurgeonRosters] = useState(() => ensureRosterShape(buildEmptyRosters(DEFAULT_FACILITIES), DEFAULT_FACILITIES));
   const [rosterFacility, setRosterFacility] = useState(ALL_SURGEONS);
   const [newSurgeonName, setNewSurgeonName] = useState("");
   const [newSurgeonSubspecialty, setNewSurgeonSubspecialty] = useState("");
+  const [editingSurgeonKey, setEditingSurgeonKey] = useState("");
+  const [editingSurgeonName, setEditingSurgeonName] = useState("");
+  const [editingSurgeonSubspecialty, setEditingSurgeonSubspecialty] = useState("");
   const [showSurgeonRosterPanel, setShowSurgeonRosterPanel] = useState(false);
   const [showRosterList, setShowRosterList] = useState(false);
   const [showProcedureRosterPanel, setShowProcedureRosterPanel] = useState(false);
@@ -936,6 +941,65 @@ export default function ORPlannerApp() {
     setNewSurgeonSubspecialty("");
   };
 
+  const surgeonRosterEditKey = (facility, surgeonName) => `${facility || ""}::${surgeonName || ""}`;
+
+  const startEditingSurgeonFromRoster = (facility, surgeon) => {
+    if (!facility || !surgeon?.name) return;
+    setEditingSurgeonKey(surgeonRosterEditKey(facility, surgeon.name));
+    setEditingSurgeonName(surgeon.name || "");
+    setEditingSurgeonSubspecialty(surgeon.subspecialty || "");
+  };
+
+  const cancelEditingSurgeonFromRoster = () => {
+    setEditingSurgeonKey("");
+    setEditingSurgeonName("");
+    setEditingSurgeonSubspecialty("");
+  };
+
+  const saveSurgeonRosterEdit = (facility, oldSurgeonName) => {
+    const oldName = (oldSurgeonName || "").trim();
+    const newName = editingSurgeonName.trim();
+    const newSpecialty = editingSurgeonSubspecialty.trim();
+    if (!facility || !oldName || !newName) return;
+
+    const sameName = oldName.toLowerCase() === newName.toLowerCase();
+    const existingRoster = surgeonRosters[facility] || [];
+    const nameConflict = existingRoster.some((s) => s.name.toLowerCase() === newName.toLowerCase() && s.name.toLowerCase() !== oldName.toLowerCase());
+    if (nameConflict) {
+      alert(`${newName} already exists in the ${facility} surgeon roster.`);
+      return;
+    }
+
+    setSurgeonRosters((prev) => {
+      const current = prev[facility] || [];
+      return {
+        ...prev,
+        [facility]: current
+          .map((surgeon) => surgeon.name === oldName ? { ...surgeon, name: newName, subspecialty: newSpecialty } : surgeon)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    });
+
+    if (!sameName) {
+      setCasesByDate((prev) => {
+        const next = {};
+        Object.entries(prev || {}).forEach(([dateKey, cases]) => {
+          next[dateKey] = (cases || []).map((caseItem) =>
+            caseItem.facility === facility && caseItem.surgeon === oldName ? { ...caseItem, surgeon: newName } : caseItem
+          );
+        });
+        return next;
+      });
+      setGrowthSurgeons((prev) => prev.map((name) => name === oldName ? newName : name).filter((name, index, arr) => arr.indexOf(name) === index));
+      setCaseTemplateSurgeon((prev) => prev === oldName ? newName : prev);
+      setSfExtractedCases((prev) => (prev || []).map((row) =>
+        row.facility === facility && row.surgeon === oldName ? { ...row, surgeon: newName, rosterSurgeonName: newName } : row
+      ));
+    }
+
+    cancelEditingSurgeonFromRoster();
+  };
+
   const removeSurgeonFromRoster = (facility, surgeon) => {
     setSurgeonRosters((prev) => ({
       ...prev,
@@ -1013,6 +1077,53 @@ export default function ORPlannerApp() {
     }
     setRosterFacility(facility);
     setSelectedFacility(facility);
+  };
+
+  const startEditingFacility = (facility) => {
+    setEditingFacilityOriginal(facility);
+    setEditingFacilityName(facility);
+  };
+
+  const cancelEditingFacility = () => {
+    setEditingFacilityOriginal("");
+    setEditingFacilityName("");
+  };
+
+  const saveFacilityRename = () => {
+    const oldName = editingFacilityOriginal.trim();
+    const newName = editingFacilityName.trim();
+    if (!oldName || !newName) return;
+    if (oldName.toLowerCase() === newName.toLowerCase()) {
+      cancelEditingFacility();
+      return;
+    }
+    if (facilities.some((facility) => facility.toLowerCase() === newName.toLowerCase() && facility.toLowerCase() !== oldName.toLowerCase())) {
+      alert(`${newName} already exists in your facility list.`);
+      return;
+    }
+
+    const confirmed = window.confirm(`Rename facility "${oldName}" to "${newName}"? Existing cases and surgeon roster entries for this facility will be updated.`);
+    if (!confirmed) return;
+
+    setFacilities((prev) => prev.map((facility) => facility === oldName ? newName : facility).sort((a, b) => a.localeCompare(b)));
+    setSurgeonRosters((prev) => {
+      const next = { ...prev };
+      next[newName] = next[oldName] || [];
+      delete next[oldName];
+      return next;
+    });
+    setCasesByDate((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([dateKey, cases]) => {
+        next[dateKey] = (cases || []).map((caseItem) => caseItem.facility === oldName ? { ...caseItem, facility: newName } : caseItem);
+      });
+      return next;
+    });
+    setSelectedFacility((prev) => prev === oldName ? newName : prev);
+    setRosterFacility((prev) => prev === oldName ? newName : prev);
+    setReviewDraft((prev) => prev?.facility === oldName ? { ...prev, facility: newName } : prev);
+    setSfExtractedCases((prev) => (prev || []).map((row) => row.facility === oldName ? { ...row, facility: newName } : row));
+    cancelEditingFacility();
   };
 
   const addFacility = () => {
@@ -2294,15 +2405,34 @@ export default function ORPlannerApp() {
                     <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-500">No facilities saved yet.</div>
                   ) : (
                     facilities.map((facility) => (
-                      <span key={facility} className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                        {facility}
-                        <button onClick={() => syncActiveFacility(facility)} className="rounded-lg px-1 py-0.5 text-left hover:bg-white" title={`Use ${facility} everywhere`}>
-                          {facility}
-                        </button>
-                        <button onClick={() => removeFacility(facility)} className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${facility}`}>
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </span>
+                      <div key={facility} className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                        {editingFacilityOriginal === facility ? (
+                          <>
+                            <input
+                              value={editingFacilityName}
+                              onChange={(e) => setEditingFacilityName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveFacilityRename();
+                                if (e.key === "Escape") cancelEditingFacility();
+                              }}
+                              className="h-8 min-w-[180px] flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-slate-300"
+                              autoFocus
+                            />
+                            <button onClick={saveFacilityRename} className="rounded-lg bg-slate-900 px-2 py-1 text-xs font-bold text-white">Save</button>
+                            <button onClick={cancelEditingFacility} className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => syncActiveFacility(facility)} className="min-w-0 max-w-full truncate rounded-lg px-1 py-0.5 text-left hover:bg-white" title={`Use ${facility} everywhere`}>
+                              {facility}
+                            </button>
+                            <button onClick={() => startEditingFacility(facility)} className="rounded-lg bg-white px-2 py-0.5 text-xs font-bold text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50">Edit</button>
+                            <button onClick={() => removeFacility(facility)} className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${facility}`}>
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     ))
                   )}
                 </div>
@@ -2312,28 +2442,26 @@ export default function ORPlannerApp() {
         </Card>
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className={showSurgeonRosterPanel ? "p-4" : "px-4 py-3"}>
+          <CardContent className={showSurgeonRosterPanel ? "relative p-4" : "px-4 py-2"}>
             {!showSurgeonRosterPanel ? (
-              <div className="flex items-start justify-between gap-3 text-sm">
-                <div>
-                  <div className="font-bold leading-tight">Surgeon Rosters</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">{Object.values(surgeonRosters).flat().length} surgeons saved</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Surgeon Rosters</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{Object.values(surgeonRosters).flat().length} saved</span>
                 </div>
                 <button
                   onClick={() => setShowSurgeonRosterPanel(true)}
-                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
                 >
                   Manage Surgeons ▼
                 </button>
               </div>
             ) : (
               <>
-            <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
+            <button onClick={() => setShowSurgeonRosterPanel(false)} className="absolute right-4 top-4 z-10 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+            <div className="grid gap-4 pr-28 lg:grid-cols-[300px_1fr] lg:items-start">
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-xl font-bold">Surgeon Rosters</h2>
-                  <button onClick={() => setShowSurgeonRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
-                </div>
+                <h2 className="text-xl font-bold">Surgeon Rosters</h2>
                 <p className="mt-1 text-sm text-slate-500">Add doctors under each saved facility. Surgery rows will then show those names in the surgeon dropdown for that facility.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-[240px_1fr_1fr_auto] md:items-start">
@@ -2367,17 +2495,51 @@ export default function ORPlannerApp() {
                   <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No doctors saved for {rosterFacility} yet.</div>
                 ) : (
                   <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {selectedRoster.map((surgeon) => (
-                      <div key={surgeon.name} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
-                        <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`shrink-0 rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
-                        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <span className="min-w-0 truncate whitespace-nowrap" title={surgeon.name}>{surgeon.name}</span>
-                          {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="hidden max-w-[35%] shrink truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={surgeon.facility}>{surgeon.facility}</span>}
-                          {surgeon.subspecialty && <span className="max-w-[42%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200" title={surgeon.subspecialty}>{surgeon.subspecialty}</span>}
-                        </div>
-                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                    {selectedRoster.map((surgeon) => {
+                      const surgeonFacility = surgeon.facility || rosterFacility;
+                      const editKey = surgeonRosterEditKey(surgeonFacility, surgeon.name);
+                      const isEditingSurgeon = editingSurgeonKey === editKey;
+                      return (
+                      <div key={`${surgeonFacility}-${surgeon.name}`} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                        {isEditingSurgeon ? (
+                          <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+                            <input
+                              value={editingSurgeonName}
+                              onChange={(e) => setEditingSurgeonName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveSurgeonRosterEdit(surgeonFacility, surgeon.name);
+                                if (e.key === "Escape") cancelEditingSurgeonFromRoster();
+                              }}
+                              className="h-9 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                              autoFocus
+                            />
+                            <input
+                              value={editingSurgeonSubspecialty}
+                              onChange={(e) => setEditingSurgeonSubspecialty(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveSurgeonRosterEdit(surgeonFacility, surgeon.name);
+                                if (e.key === "Escape") cancelEditingSurgeonFromRoster();
+                              }}
+                              placeholder="Subspecialty"
+                              className="h-9 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                            />
+                            <button onClick={() => saveSurgeonRosterEdit(surgeonFacility, surgeon.name)} className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white">Save</button>
+                            <button onClick={cancelEditingSurgeonFromRoster} className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200">Cancel</button>
+                          </div>
+                        ) : (
+                          <>
+                            <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`shrink-0 rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
+                            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                              <span className="min-w-0 truncate whitespace-nowrap" title={surgeon.name}>{surgeon.name}</span>
+                              {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="hidden max-w-[35%] shrink truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={surgeon.facility}>{surgeon.facility}</span>}
+                              {surgeon.subspecialty && <span className="max-w-[42%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200" title={surgeon.subspecialty}>{surgeon.subspecialty}</span>}
+                            </div>
+                            <button onClick={() => startEditingSurgeonFromRoster(surgeonFacility, surgeon)} className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100">Edit</button>
+                            <button onClick={() => removeSurgeonFromRoster(surgeonFacility, surgeon.name)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                          </>
+                        )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
@@ -2389,28 +2551,26 @@ export default function ORPlannerApp() {
 
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className={showProcedureRosterPanel ? "p-4" : "px-4 py-3"}>
+          <CardContent className={showProcedureRosterPanel ? "relative p-4" : "px-4 py-2"}>
             {!showProcedureRosterPanel ? (
-              <div className="flex items-start justify-between gap-3 text-sm">
-                <div>
-                  <div className="font-bold leading-tight">Procedure Roster</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">{procedureRosterItems.length} saved procedures</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Procedure Roster</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{procedureRosterItems.length} saved</span>
                 </div>
                 <button
                   onClick={() => setShowProcedureRosterPanel(true)}
-                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
                 >
                   Manage Procedures ▼
                 </button>
               </div>
             ) : (
               <>
-                <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
+                <button onClick={() => setShowProcedureRosterPanel(false)} className="absolute right-4 top-4 z-10 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                <div className="grid gap-4 pr-28 lg:grid-cols-[300px_1fr] lg:items-start">
                   <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xl font-bold">Procedure Roster</h2>
-                      <button onClick={() => setShowProcedureRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
-                    </div>
+                    <h2 className="text-xl font-bold">Procedure Roster</h2>
                     <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Edit a name to rename matching existing cases; remove/hide one to keep it out of suggestions without deleting cases.</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-start">
@@ -2944,7 +3104,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3b · always show procedure roster match</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3g · true top-right roster collapse</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
