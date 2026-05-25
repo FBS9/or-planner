@@ -1039,10 +1039,74 @@ export default function ORPlannerApp() {
 
   const sfSurgeonScore = (left = "", right = "") => {
     const similarity = sfSimilarityScore(left, right);
-    const leftLast = sfLastName(left);
-    const rightLast = sfLastName(right);
-    const lastNameMatch = leftLast && rightLast && leftLast === rightLast ? 0.9 : 0;
-    return Math.max(similarity, lastNameMatch);
+    const leftTokens = sfTokens(left).filter((token) => token !== "dr");
+    const rightTokens = sfTokens(right).filter((token) => token !== "dr");
+    const leftLast = leftTokens[leftTokens.length - 1] || "";
+    const rightLast = rightTokens[rightTokens.length - 1] || "";
+    const leftFirst = leftTokens[0] || "";
+    const rightFirst = rightTokens[0] || "";
+    const sameLast = leftLast && rightLast && leftLast === rightLast;
+    const firstCompatible =
+      !leftFirst ||
+      !rightFirst ||
+      leftFirst === rightFirst ||
+      leftFirst[0] === rightFirst[0];
+
+    let nameStructureScore = 0;
+    if (sameLast && firstCompatible) nameStructureScore = 0.97;
+    else if (sameLast) nameStructureScore = 0.88;
+
+    return Math.max(similarity, nameStructureScore);
+  };
+
+  const sfPreferredSurgeonRosterEntry = (left, right) => {
+    const leftName = normalizeSfText(left?.name || "");
+    const rightName = normalizeSfText(right?.name || "");
+    const leftStartsDr = /^dr\.?\s+/i.test(leftName);
+    const rightStartsDr = /^dr\.?\s+/i.test(rightName);
+    if (leftStartsDr !== rightStartsDr) return leftStartsDr ? left : right;
+
+    const leftTokenCount = sfTokens(leftName).filter((token) => token !== "dr").length;
+    const rightTokenCount = sfTokens(rightName).filter((token) => token !== "dr").length;
+    if (leftTokenCount !== rightTokenCount) return leftTokenCount > rightTokenCount ? left : right;
+
+    return leftName.length >= rightName.length ? left : right;
+  };
+
+  const sfBestRosterSurgeonMatch = (facility = "", surgeonName = "") => {
+    const normalizedFacility = normalizeSfText(facility);
+    const normalizedSurgeon = normalizeSfText(surgeonName);
+    if (!normalizedFacility || !normalizedSurgeon) return null;
+
+    const candidates = surgeonRosters[normalizedFacility] || [];
+    const ranked = candidates
+      .map((surgeon) => ({ surgeon, score: sfSurgeonScore(surgeon?.name || "", normalizedSurgeon) }))
+      .filter((candidate) => candidate.score >= 0.9)
+      .sort((a, b) => b.score - a.score || (b.surgeon?.name || "").length - (a.surgeon?.name || "").length);
+
+    return ranked[0] || null;
+  };
+
+  const sfCanonicalSurgeonNameForFacility = (facility = "", surgeonName = "") => {
+    const match = sfBestRosterSurgeonMatch(facility, surgeonName);
+    return match?.surgeon?.name || normalizeSfText(surgeonName);
+  };
+
+  const sfCanonicalizeSurgeonForRow = (row) => {
+    const facility = normalizeSfText(row?.facility);
+    const surgeon = normalizeSfText(row?.surgeon);
+    if (!facility || !surgeon) return row;
+
+    const canonicalName = sfCanonicalSurgeonNameForFacility(facility, surgeon);
+    if (!canonicalName || canonicalName === surgeon) return row;
+
+    return {
+      ...row,
+      surgeon: canonicalName,
+      rosterSurgeonName: canonicalName,
+      rosterSurgeonSubspecialty: getSubspecialty(surgeonRosters, facility, canonicalName) || row.rosterSurgeonSubspecialty || row.category || "",
+      surgeonCanonicalizedFrom: surgeon,
+    };
   };
 
   const sfTimeDifferenceMinutes = (left = "", right = "") => {
@@ -1090,20 +1154,28 @@ export default function ORPlannerApp() {
   };
 
   const sfSurgeonExistsInFacility = (facility = "", surgeonName = "") => {
-    const normalizedFacility = normalizeSfText(facility);
-    const normalizedSurgeon = normalizeSurgeonSearch(surgeonName);
-    if (!normalizedFacility || !normalizedSurgeon) return false;
-
-    return (surgeonRosters[normalizedFacility] || []).some((surgeon) =>
-      normalizeSurgeonSearch(surgeon?.name || "") === normalizedSurgeon
-    );
+    return Boolean(sfBestRosterSurgeonMatch(facility, surgeonName));
   };
 
   const sfAddSurgeonToRosterFromRow = (row) => {
     const facility = normalizeSfText(row?.facility);
-    const surgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
-    if (!facility || !surgeonName) return;
+    const typedSurgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
+    if (!facility || !typedSurgeonName) return;
 
+    const existingMatch = sfBestRosterSurgeonMatch(facility, typedSurgeonName);
+    if (existingMatch?.surgeon?.name) {
+      const canonicalName = existingMatch.surgeon.name;
+      updateSalesforceRow(row.id, {
+        surgeon: canonicalName,
+        rosterSurgeonName: canonicalName,
+        rosterSurgeonSubspecialty: existingMatch.surgeon.subspecialty || row?.rosterSurgeonSubspecialty || row?.category || "",
+        surgeonCanonicalizedFrom: normalizeSfText(row?.surgeon),
+      });
+      setSfApplySummary(`Matched ${typedSurgeonName} to existing roster surgeon ${canonicalName}. No duplicate surgeon was added.`);
+      return;
+    }
+
+    const surgeonName = typedSurgeonName;
     const subspecialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category);
 
     setFacilities((prev) =>
@@ -1376,7 +1448,7 @@ export default function ORPlannerApp() {
       const surgeon = normalizeSfText(item.surgeon);
       const facilityResolution = sfFacilityFromRowOrSurgeon(item.hospital, surgeon);
 
-      const baseRow = {
+      const rawBaseRow = {
         id: `sf-row-${Date.now()}-${index}`,
         date: normalizeSfText(item.date),
         dateKey: sfDateToDateKey(item.date),
@@ -1396,6 +1468,8 @@ export default function ORPlannerApp() {
         notes: normalizeSfText(item.notes),
         actionManuallyEdited: false,
       };
+
+      const baseRow = sfCanonicalizeSurgeonForRow(rawBaseRow);
 
       return {
         ...baseRow,
@@ -1444,11 +1518,13 @@ export default function ORPlannerApp() {
       prev.map((item) => {
         if (item.id !== id) return item;
 
-        const patched = {
+        const rawPatched = {
           ...item,
           ...patch,
           actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
         };
+
+        const patched = sfCanonicalizeSurgeonForRow(rawPatched);
 
         if (!patched.actionManuallyEdited) {
           return {
@@ -1547,14 +1623,15 @@ export default function ORPlannerApp() {
 
         if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(item.action)) {
           const facility = item.facility || sfAccountName || "";
+          const canonicalSurgeon = sfCanonicalSurgeonNameForFacility(facility, item.surgeon || "");
           const newCase = {
             ...blankCase(dateKey, facility),
             time: item.time || "",
-            surgeon: item.surgeon || "",
+            surgeon: canonicalSurgeon || item.surgeon || "",
             procedure: item.procedure || "",
             fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
             reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
-            growth: isAutoGrowthSurgeon(item.surgeon || ""),
+            growth: isAutoGrowthSurgeon(canonicalSurgeon || item.surgeon || ""),
             notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
             salesforceImportedAt: now,
             salesforceStatus: item.salesforceStatus,
@@ -1586,6 +1663,77 @@ export default function ORPlannerApp() {
     setSfExtractedCases((prev) => prev.filter((item) => item.action === "review"));
     setSfApplySummary(`Applied ${importedCount + reconciledCount + fastTrackedCount + ignoredCount} row(s): ${importedCount} imported, ${reconciledCount} reconciled, ${fastTrackedCount} marked fast tracked, ${ignoredCount} ignored. ${skippedCount ? `${skippedCount} row(s) still need review or were skipped.` : ""}`.trim());
   };
+
+  useEffect(() => {
+    // Keep Salesforce imports from creating near-duplicate surgeon names like
+    // Avoid creating duplicate roster names when Salesforce omits Dr., uses initials, or varies first-name formatting.
+    // This also cleans up existing imported cases after the roster matching fix is installed.
+    setSurgeonRosters((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.entries(prev || {}).forEach(([facility, roster]) => {
+        const deduped = [];
+
+        (roster || []).forEach((surgeon) => {
+          const existingIndex = deduped.findIndex((candidate) => sfSurgeonScore(candidate?.name || "", surgeon?.name || "") >= 0.9);
+
+          if (existingIndex < 0) {
+            deduped.push(surgeon);
+            return;
+          }
+
+          changed = true;
+          const preferred = sfPreferredSurgeonRosterEntry(deduped[existingIndex], surgeon);
+          const other = preferred === deduped[existingIndex] ? surgeon : deduped[existingIndex];
+          deduped[existingIndex] = {
+            ...preferred,
+            subspecialty: preferred.subspecialty || other.subspecialty || "",
+          };
+        });
+
+        const sorted = deduped.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        if (sorted.length !== (roster || []).length || JSON.stringify(sorted) !== JSON.stringify(roster || [])) {
+          changed = true;
+          next[facility] = sorted;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+
+    setCasesByDate((prev) => {
+      let changed = false;
+      const next = {};
+
+      Object.entries(prev || {}).forEach(([dateKey, dateCases]) => {
+        next[dateKey] = (dateCases || []).map((item) => {
+          const canonicalSurgeon = sfCanonicalSurgeonNameForFacility(item.facility, item.surgeon);
+          if (!canonicalSurgeon || canonicalSurgeon === item.surgeon) return item;
+          changed = true;
+          return {
+            ...item,
+            surgeon: canonicalSurgeon,
+            growth: item.growth || isAutoGrowthSurgeon(canonicalSurgeon),
+          };
+        });
+      });
+
+      return changed ? next : prev;
+    });
+
+    setGrowthSurgeons((prev) => {
+      const canonical = prev.map((name) => {
+        for (const facility of sortedFacilities) {
+          const match = sfCanonicalSurgeonNameForFacility(facility, name);
+          if (match && match !== name) return match;
+        }
+        return name;
+      });
+      const unique = Array.from(new Set(canonical));
+      return JSON.stringify(unique) === JSON.stringify(prev) ? prev : unique;
+    });
+  }, [surgeonRosters]);
 
   const resetSalesforceImport = () => {
     setSfFile(null);
@@ -1944,18 +2092,18 @@ export default function ORPlannerApp() {
               </div>
             </div>
             {showRosterList && (
-              <div className="mt-3 rounded-2xl bg-slate-100 p-2">
+              <div className="mt-3 overflow-hidden rounded-2xl bg-slate-100 p-2">
                 {selectedRoster.length === 0 ? (
                   <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No doctors saved for {rosterFacility} yet.</div>
                 ) : (
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {selectedRoster.map((surgeon) => (
-                      <div key={surgeon.name} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
-                        <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
-                        <span className="truncate">{surgeon.name}</span>
-                        {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
-                        {surgeon.subspecialty && <span className="truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
-                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="ml-auto rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                      <div key={surgeon.name} className="flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                        <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`shrink-0 rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
+                        <span className="min-w-0 flex-1 truncate">{surgeon.name}</span>
+                        {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="min-w-0 max-w-full truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
+                        {surgeon.subspecialty && <span className="min-w-0 max-w-full truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
+                        <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     ))}
                   </div>
@@ -2434,7 +2582,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2q · incomplete row facility select</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2t · roster mobile wrapping</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2567,7 +2715,12 @@ export default function ORPlannerApp() {
                               {item.facilitySource === "surgeon_roster" && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from surgeon roster</span>}
                               {item.facilityOptions?.length > 1 && <span className="ml-2 rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-bold text-yellow-800">multiple affiliations</span>}
                             </div>
-                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
+                            <div>
+                              <span className="font-bold">Surgeon:</span> {item.surgeon || "—"}
+                              {item.surgeonCanonicalizedFrom && item.surgeonCanonicalizedFrom !== item.surgeon && (
+                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched roster: {item.surgeonCanonicalizedFrom}</span>
+                              )}
+                            </div>
                             <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
                             {(item.scheduledDate || item.salesforceStatus) && (
                               <div className="md:col-span-2">
