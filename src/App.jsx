@@ -2929,7 +2929,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2z · editable procedure roster</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3a · matched procedure roster badge</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3068,7 +3068,12 @@ export default function ORPlannerApp() {
                                 <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched roster: {item.surgeonCanonicalizedFrom}</span>
                               )}
                             </div>
-                            <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
+                            <div className="md:col-span-2">
+                              <span className="font-bold">Procedure:</span> {item.procedure || "—"}
+                              {item.procedureCanonicalizedFrom && item.procedureCanonicalizedFrom !== item.procedure && (
+                                <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">matched procedure roster: {item.procedureCanonicalizedFrom}</span>
+                              )}
+                            </div>
                             {(item.scheduledDate || item.salesforceStatus) && (
                               <div className="md:col-span-2">
                                 <span className="font-bold">Salesforce:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}
