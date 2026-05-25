@@ -1003,7 +1003,8 @@ export default function ORPlannerApp() {
   const normalizeSfKey = (value = "") =>
     normalizeSfText(value)
       .toLowerCase()
-      .replace(/[^a-z0-9\s/-]/g, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/[^a-z0-9\s/]/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -1122,7 +1123,7 @@ export default function ORPlannerApp() {
 
     // Scheduled Procedures screen is different from Account Procedure History.
     // These are newly scheduled rows and should become fastTracking cases.
-    if (type.includes("scheduled_procedures") || recommended.includes("import_new_fast_tracking")) return "importNew";
+    if (type.includes("scheduled procedures") || recommended.includes("import new fast tracking")) return "importNew";
 
     // Account Procedure History rule:
     // Scheduled column controls fastTracking. Status controls reconciled.
@@ -1135,19 +1136,19 @@ export default function ORPlannerApp() {
     if (sfIsOnSite(item)) return "importNewNormal";
 
     // Fallback to AI recommendation only when status/scheduled fields do not make it obvious.
-    if (recommended.includes("mark_existing")) return "markReconciled";
-    if (recommended.includes("already_fast_tracked")) return "ignore";
-    if (recommended.includes("not_fast_tracked") && recommended.includes("reconciled")) return "importNewNormalReconciled";
-    if (recommended.includes("not_fast_tracked")) return "importNewNormal";
-    if (recommended.includes("import_new") && recommended.includes("reconciled")) return "importNewNormalReconciled";
-    if (recommended.includes("import_new")) return "importNewNormal";
+    if (recommended.includes("mark existing")) return "markReconciled";
+    if (recommended.includes("already fast tracked")) return "ignore";
+    if (recommended.includes("not fast tracked") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("not fast tracked")) return "importNewNormal";
+    if (recommended.includes("import new") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("import new")) return "importNewNormal";
 
     return "review";
   };
 
   const sfHasRequiredNewCaseFields = (item, screenshotType = "") => {
     const type = normalizeSfKey(screenshotType);
-    const requiresTime = type.includes("scheduled_procedures");
+    const requiresTime = type.includes("scheduled procedures");
 
     if (!item.dateKey || !item.facility || !item.surgeon || !item.procedure) return false;
     if (requiresTime && !item.time) return false;
@@ -1191,7 +1192,7 @@ export default function ORPlannerApp() {
     const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
     const screenshotKey = normalizeSfKey(screenshotType);
     const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
-    const isScheduledProceduresRow = screenshotKey.includes("scheduled_procedures") || recommendedKey.includes("import_new_fast_tracking");
+    const isScheduledProceduresRow = screenshotKey.includes("scheduled procedures") || recommendedKey.includes("import new fast tracking");
     const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
     const matches = sfGetPlannerMatches(baseRow, matchMode);
     const bestMatch = matches[0];
@@ -1321,6 +1322,12 @@ export default function ORPlannerApp() {
       return changed ? next : prev;
     });
   }, [casesByDate, sfScreenshotType, sfExtractedCases.length]);
+
+  const sfEffectiveRow = (item) => {
+    if (item.actionManuallyEdited) return item;
+    const resolved = sfResolveRowReviewState(item, sfScreenshotType);
+    return { ...item, ...resolved };
+  };
 
   const updateSalesforceRow = (id, patch) => {
     const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
@@ -2307,6 +2314,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2h · stored action workflow</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner.
                 </p>
@@ -2399,7 +2407,8 @@ export default function ORPlannerApp() {
                 <div className="min-w-0">
                   {sfExtractedCases.length > 0 ? (
                     <div className="space-y-3">
-                      {sfExtractedCases.map((item, index) => (
+                      {sfExtractedCases.map((item, index) => {
+                        return (
                         <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="font-bold text-slate-900">Row {index + 1}</div>
@@ -2479,7 +2488,8 @@ export default function ORPlannerApp() {
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="flex min-h-[320px] items-center justify-center rounded-3xl bg-white p-6 text-center text-sm text-slate-500 ring-1 ring-slate-200">
