@@ -9,6 +9,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 const WEEK_START_OPTIONS = DAYS;
 const ALL_FACILITIES = "All Facilities";
 const ALL_SURGEONS = "All Surgeons";
+const ALL_PROCEDURE_SPECIALTIES = "All Specialties";
 
 const getOrderedDays = (weekStartDay) => {
   const startIndex = DAYS.indexOf(weekStartDay);
@@ -267,6 +268,10 @@ export default function ORPlannerApp() {
   const [newSurgeonSubspecialty, setNewSurgeonSubspecialty] = useState("");
   const [showSurgeonRosterPanel, setShowSurgeonRosterPanel] = useState(false);
   const [showRosterList, setShowRosterList] = useState(false);
+  const [showProcedureRosterPanel, setShowProcedureRosterPanel] = useState(false);
+  const [showProcedureList, setShowProcedureList] = useState(false);
+  const [procedureRosterSpecialty, setProcedureRosterSpecialty] = useState(ALL_PROCEDURE_SPECIALTIES);
+  const [procedureExclusions, setProcedureExclusions] = useState([]);
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
   const [weekStartDay, setWeekStartDay] = useState("Sunday");
   const [showWeekSettings, setShowWeekSettings] = useState(false);
@@ -322,6 +327,39 @@ export default function ORPlannerApp() {
       }),
     };
   }).filter((day) => day.facilities.length > 0);
+
+
+  const procedureExclusionKeys = useMemo(() => new Set((procedureExclusions || []).map((item) => normalizeProcedureSearch(typeof item === "string" ? item : item?.procedure)).filter(Boolean)), [procedureExclusions]);
+
+  const isProcedureHiddenFromRoster = (procedure = "") => procedureExclusionKeys.has(normalizeProcedureSearch(procedure));
+
+  const procedureRosterItems = useMemo(() => {
+    const counts = new Map();
+    Object.entries(casesByDate || {}).forEach(([dateKey, cases]) => {
+      (cases || []).forEach((item) => {
+        const procedure = (item.procedure || "").trim();
+        if (!procedure || procedure.length < 2 || procedure.toLowerCase() === "hysterectomy b") return;
+        if (procedureExclusionKeys.has(normalizeProcedureSearch(procedure))) return;
+        const specialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon) || "Unassigned";
+        const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
+        const existing = counts.get(key) || { procedure, specialty, count: 0, lastUsed: "" };
+        existing.count += 1;
+        if (!existing.lastUsed || dateKey > existing.lastUsed) existing.lastUsed = dateKey;
+        counts.set(key, existing);
+      });
+    });
+    return Array.from(counts.values()).sort((a, b) => a.specialty.localeCompare(b.specialty) || a.procedure.localeCompare(b.procedure));
+  }, [casesByDate, surgeonRosters, procedureExclusionKeys]);
+
+  const procedureRosterSpecialties = useMemo(() => {
+    const specialties = Array.from(new Set(procedureRosterItems.map((item) => item.specialty || "Unassigned"))).sort((a, b) => a.localeCompare(b));
+    return [ALL_PROCEDURE_SPECIALTIES, ...specialties];
+  }, [procedureRosterItems]);
+
+  const selectedProcedureRosterItems = useMemo(() => {
+    if (procedureRosterSpecialty === ALL_PROCEDURE_SPECIALTIES) return procedureRosterItems;
+    return procedureRosterItems.filter((item) => item.specialty === procedureRosterSpecialty);
+  }, [procedureRosterItems, procedureRosterSpecialty]);
 
   const selectedYear = fromDateKey(selectedDate).getFullYear();
   const selectedWeekEnd = weekDates[weekDates.length - 1];
@@ -390,6 +428,7 @@ export default function ORPlannerApp() {
     casesByDate,
     facilities: sortedFacilities,
     surgeonRosters,
+    procedureExclusions,
     growthSurgeons,
     weekStartDay,
   });
@@ -403,6 +442,7 @@ export default function ORPlannerApp() {
     setSurgeonRosters(ensureRosterShape(snapshot.surgeonRosters || buildEmptyRosters(nextFacilities), nextFacilities));
     setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
     setGrowthSurgeons(Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : []);
+    setProcedureExclusions(Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : []);
     setWeekStartDay(WEEK_START_OPTIONS.includes(snapshot.weekStartDay) ? snapshot.weekStartDay : "Sunday");
   };
 
@@ -419,6 +459,7 @@ export default function ORPlannerApp() {
         setRosterFacility((prev) => prev === ALL_SURGEONS || parsedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
+        setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } else {
         const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
@@ -438,6 +479,7 @@ export default function ORPlannerApp() {
           setRosterFacility((prev) => prev === ALL_SURGEONS || oldFacilities.includes(prev) ? prev : ALL_SURGEONS);
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
           setGrowthSurgeons(Array.isArray(old.growthSurgeons) ? old.growthSurgeons : []);
+          setProcedureExclusions(Array.isArray(old.procedureExclusions) ? old.procedureExclusions : []);
           setWeekStartDay(migratedWeekStartDay);
         }
       }
@@ -451,7 +493,7 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(getPlannerSnapshot()));
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -609,7 +651,7 @@ export default function ORPlannerApp() {
     }, 2000);
 
     return () => window.clearTimeout(timeout);
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -704,13 +746,13 @@ export default function ORPlannerApp() {
     Object.entries(casesByDate).forEach(([, cases]) => {
       (cases || []).forEach((item) => {
         const procedure = (item.procedure || "").trim();
-        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b") return;
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b" || isProcedureHiddenFromRoster(procedure)) return;
         const itemSpecialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon);
         if (normalizeProcedureSearch(itemSpecialty) === specialty) procedures.add(procedure);
       });
     });
     return Array.from(procedures).sort((a, b) => a.localeCompare(b));
-  }, [casesByDate, surgeonRosters, addSurgerySpecialty]);
+  }, [casesByDate, surgeonRosters, addSurgerySpecialty, procedureExclusionKeys]);
 
   const filteredProcedureOptions = useMemo(() => {
     const query = normalizeProcedureSearch(caseTemplateProcedure);
@@ -900,6 +942,19 @@ export default function ORPlannerApp() {
     setGrowthSurgeons((prev) => prev.filter((s) => s !== surgeon));
   };
 
+  const removeProcedureFromRoster = (procedure) => {
+    const cleanProcedure = (procedure || "").trim();
+    if (!cleanProcedure) return;
+    const confirmed = window.confirm(`Hide "${cleanProcedure}" from saved procedure suggestions and Salesforce matching? Existing cases will not be deleted.`);
+    if (!confirmed) return;
+    setProcedureExclusions((prev) => {
+      const existing = new Set((prev || []).map((item) => normalizeProcedureSearch(typeof item === "string" ? item : item?.procedure)).filter(Boolean));
+      const key = normalizeProcedureSearch(cleanProcedure);
+      if (existing.has(key)) return prev;
+      return [...(prev || []), cleanProcedure];
+    });
+  };
+
   const toggleGrowthSurgeon = (surgeon) => {
     setGrowthSurgeons((prev) => (prev.includes(surgeon) ? prev.filter((s) => s !== surgeon) : [...prev, surgeon]));
   };
@@ -968,6 +1023,7 @@ export default function ORPlannerApp() {
         setRosterFacility((prev) => prev === ALL_SURGEONS || importedFacilities.includes(prev) ? prev : ALL_SURGEONS);
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
+        setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } catch {
         alert("Could not import that file. Please use an exported OR Planner JSON backup.");
@@ -978,7 +1034,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1173,7 +1229,7 @@ export default function ORPlannerApp() {
     Object.entries(sourceCasesByDate || {}).forEach(([, dateCases]) => {
       (dateCases || []).forEach((item) => {
         const procedure = normalizeSfText(item?.procedure);
-        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b") return;
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b" || isProcedureHiddenFromRoster(procedure)) return;
 
         const itemSpecialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon));
         const sameSpecialty = normalizedSpecialty && itemSpecialty && normalizedSpecialty === itemSpecialty;
@@ -2271,6 +2327,73 @@ export default function ORPlannerApp() {
           </CardContent>
         </Card>
 
+
+        <Card className="rounded-3xl shadow-sm">
+          <CardContent className={showProcedureRosterPanel ? "p-4" : "px-4 py-3"}>
+            {!showProcedureRosterPanel ? (
+              <div className="flex items-start justify-between gap-3 text-sm">
+                <div>
+                  <div className="font-bold leading-tight">Procedure Roster</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">{procedureRosterItems.length} saved procedures</div>
+                </div>
+                <button
+                  onClick={() => setShowProcedureRosterPanel(true)}
+                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Manage Procedures ▼
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-4 lg:grid-cols-[300px_1fr] lg:items-start">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-xl font-bold">Procedure Roster</h2>
+                      <button onClick={() => setShowProcedureRosterPanel(false)} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Collapse ▲</button>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">Manage saved procedure names used for procedure search and Salesforce matching. Removing one hides it from suggestions; it does not delete existing cases.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-start">
+                    <div className="space-y-2">
+                      <select value={procedureRosterSpecialty} onChange={(e) => setProcedureRosterSpecialty(e.target.value)} className="input">
+                        {procedureRosterSpecialties.map((specialty) => <option key={specialty}>{specialty}</option>)}
+                      </select>
+                      <button
+                        onClick={() => setShowProcedureList((prev) => !prev)}
+                        className="flex w-full items-center justify-between rounded-2xl bg-slate-100 px-3 py-2 text-left text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
+                      >
+                        <span>Procedures</span>
+                        <span className="text-slate-500">{selectedProcedureRosterItems.length} saved {showProcedureList ? "▲" : "▼"}</span>
+                      </button>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-800 ring-1 ring-blue-100">
+                      Use this to remove duplicates like “Ventral Hernia IPOM” when you already want Salesforce and manual entry to use “Ventral.”
+                    </div>
+                  </div>
+                </div>
+                {showProcedureList && (
+                  <div className="mt-3 w-full min-w-0 overflow-hidden rounded-2xl bg-slate-100 p-2">
+                    {selectedProcedureRosterItems.length === 0 ? (
+                      <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No saved procedures found for this filter.</div>
+                    ) : (
+                      <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {selectedProcedureRosterItems.map((item) => (
+                          <div key={`${item.specialty}-${item.procedure}`} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                            <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={item.procedure}>{item.procedure}</span>
+                            <span className="hidden max-w-[35%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={item.specialty}>{item.specialty}</span>
+                            <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count}x</span>
+                            <button onClick={() => removeProcedureFromRoster(item.procedure)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${item.procedure}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="space-y-4 p-4">
@@ -2737,7 +2860,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2x · procedure roster matching</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2y · procedure roster management</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
