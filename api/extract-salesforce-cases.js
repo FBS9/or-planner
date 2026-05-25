@@ -1,201 +1,21 @@
-import OpenAI from "openai";
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-function readRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-
-    req.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-
-    req.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-
-    req.on("error", reject);
-  });
-}
-
-function parseDataUrl(value = "") {
-  const match = String(value).match(/^data:([^;]+);base64,(.+)$/);
-
-  if (!match) return null;
-
-  return {
-    mimeType: match[1],
-    buffer: Buffer.from(match[2], "base64"),
-  };
-}
-
-function extractMultipartFile(buffer, contentType) {
-  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2];
-
-  if (!boundary) {
-    throw new Error("Missing multipart boundary.");
-  }
-
-  const boundaryBuffer = Buffer.from(`--${boundary}`);
-  const parts = [];
-  let start = buffer.indexOf(boundaryBuffer);
-
-  while (start !== -1) {
-    const next = buffer.indexOf(boundaryBuffer, start + boundaryBuffer.length);
-    if (next === -1) break;
-
-    const part = buffer.slice(start + boundaryBuffer.length, next);
-    parts.push(part);
-    start = next;
-  }
-
-  const filePart = parts.find((part) => {
-    const headerPreview = part.toString(
-      "latin1",
-      0,
-      Math.min(part.length, 1500)
-    );
-
-    return (
-      headerPreview.includes('name="image"') ||
-      headerPreview.includes('name="file"') ||
-      headerPreview.includes('name="screenshot"') ||
-      headerPreview.includes("Content-Type: image/")
-    );
-  });
-
-  if (!filePart) {
-    throw new Error(
-      'No uploaded image found. Expected multipart field named "image", "file", or "screenshot".'
-    );
-  }
-
-  const headerEnd = filePart.indexOf(Buffer.from("\r\n\r\n"));
-
-  if (headerEnd === -1) {
-    throw new Error("Invalid multipart image upload.");
-  }
-
-  const headersText = filePart.toString("latin1", 0, headerEnd);
-  let fileBuffer = filePart.slice(headerEnd + 4);
-
-  if (fileBuffer.slice(0, 2).toString("latin1") === "\r\n") {
-    fileBuffer = fileBuffer.slice(2);
-  }
-
-  if (fileBuffer.slice(-2).toString("latin1") === "\r\n") {
-    fileBuffer = fileBuffer.slice(0, -2);
-  }
-
-  const mimeMatch = headersText.match(/Content-Type:\s*([^\r\n]+)/i);
-  const mimeType = mimeMatch?.[1]?.trim() || "image/png";
-
-  return {
-    buffer: fileBuffer,
-    mimeType,
-  };
-}
-
-function extractJsonImage(buffer) {
-  const text = buffer.toString("utf8");
-  const body = JSON.parse(text);
-
-  const possibleDataUrl =
-    body.imageUrl ||
-    body.dataUrl ||
-    body.imageDataUrl ||
-    body.screenshotDataUrl ||
-    body.image;
-
-  if (typeof possibleDataUrl === "string") {
-    const parsedDataUrl = parseDataUrl(possibleDataUrl);
-
-    if (parsedDataUrl) {
-      return parsedDataUrl;
-    }
-  }
-
-  const possibleBase64 =
-    body.imageBase64 ||
-    body.base64 ||
-    body.screenshotBase64 ||
-    body.fileBase64;
-
-  if (typeof possibleBase64 === "string") {
-    return {
-      mimeType: body.mimeType || body.type || "image/png",
-      buffer: Buffer.from(
-        possibleBase64.replace(/^data:[^;]+;base64,/, ""),
-        "base64"
-      ),
-    };
-  }
-
-  throw new Error(
-    "JSON request did not include imageBase64, base64, imageUrl, dataUrl, or image."
-  );
-}
-
-async function getImageFromRequest(req) {
-  const contentType = req.headers["content-type"] || "";
-  const rawBody = await readRawBody(req);
-
-  if (!rawBody.length) {
-    throw new Error("No request body received.");
-  }
-
-  if (contentType.includes("multipart/form-data")) {
-    return extractMultipartFile(rawBody, contentType);
-  }
-
-  if (contentType.includes("application/json")) {
-    return extractJsonImage(rawBody);
-  }
-
-  const dataUrl = parseDataUrl(rawBody.toString("utf8"));
-
-  if (dataUrl) {
-    return dataUrl;
-  }
-
-  throw new Error(
-    `Unsupported upload format: ${contentType || "missing content-type"}`
-  );
-}
-
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed." });
+  }
+
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed." });
-    }
-
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({
-        error: "Missing OPENAI_API_KEY environment variable.",
-      });
+      return res.status(500).json({ error: "OPENAI_API_KEY is not configured in Vercel." });
     }
 
-    const { buffer: imageBuffer, mimeType } = await getImageFromRequest(req);
-    const base64 = imageBuffer.toString("base64");
+    const { imageBase64, mimeType = "image/png" } = req.body || {};
 
-    const response = await openai.responses.create({
-      model: "gpt-5.4-mini",
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Missing imageBase64." });
+    }
+
+    const prompt = `
 You are extracting surgical procedure/case rows from a Salesforce screenshot.
 
 Return ONLY valid JSON. Do not include markdown. Do not include commentary.
@@ -207,7 +27,7 @@ Use this exact JSON shape:
   "accountName": "",
   "cases": [
     {
-      "date": "YYYY-MM-DD",
+      "date": "MM/DD/YYYY",
       "time": "HH:MM AM/PM",
       "hospital": "",
       "category": "",
@@ -222,10 +42,10 @@ Use this exact JSON shape:
   ]
 }
 
-Recognize two screenshot types.
+Screenshot type 1: Scheduled Procedures
+This may appear in either Salesforce desktop/table layout OR Salesforce mobile/card layout.
 
-TYPE 1: Scheduled Procedures screen
-Usually has header "Scheduled Procedures" and columns:
+Desktop/table layout usually has a title/header saying "Scheduled Procedures" and columns like:
 - Scheduled Date
 - Scheduled Time
 - Hospital Name
@@ -233,22 +53,35 @@ Usually has header "Scheduled Procedures" and columns:
 - Procedure Name
 - Surgeon Name
 
-For this type:
-- screenshotType should be "scheduled_procedures".
-- Extract every visible row.
-- date should come from Scheduled Date.
-- time should come from Scheduled Time.
-- hospital should come from Hospital Name.
-- category should come from Category.
-- procedure should come from Procedure Name.
-- surgeon should come from Surgeon Name.
-- scheduledDate should be blank.
-- salesforceStatus should be blank.
-- recommendedAction should be "import_new_fast_tracking".
-- notes should say "Scheduled Procedures screen. Treat as new fast tracked OR Planner case unless a duplicate already exists."
+Mobile/card layout may have:
+- Top header such as "Reconcile Procedures"
+- A tab bar where "Scheduled Procedures" is highlighted/selected, often blue
+- A neighboring tab such as "Onsite Procedures" that is not selected
+- Each visible case appears as a card/list item, not a table row
+- Hospital/account name appears large on the left
+- Category appears below the hospital
+- Procedure appears below category
+- Surgeon appears below procedure
+- Date and time appear as gray pills/badges on the right
 
-TYPE 2: Account Procedure History screen
-Usually has columns like:
+If the mobile screenshot has the "Scheduled Procedures" tab selected/highlighted, classify it as "scheduled_procedures" even if the page header says "Reconcile Procedures".
+
+For Scheduled Procedures screenshots:
+- Every visible row is a new fast tracked case candidate.
+- Extract Scheduled Date into "date".
+- Extract Scheduled Time into "time".
+- Extract Hospital Name into "hospital".
+- Extract Category into "category".
+- Extract Procedure Name into "procedure".
+- Extract Surgeon Name into "surgeon".
+- scheduledDate should be blank unless there is a separate visible Scheduled column.
+- salesforceStatus should be blank unless visible.
+- recommendedAction should be "import_new_fast_tracked_unreconciled".
+- notes should say "Scheduled Procedures row. Import as fast tracked and unreconciled unless duplicate exists."
+- screenshotType should be "scheduled_procedures".
+
+Screenshot type 2: Account Procedure History List
+This usually has columns like:
 - Surgeon
 - Procedure Date
 - Product Family Type
@@ -257,82 +90,96 @@ Usually has columns like:
 - Scheduled
 - Status
 
-For this type:
+For Account Procedure History screenshots:
+- Use the account name from the breadcrumb/header as hospital when visible.
+- Extract Procedure Date into "date".
+- Extract Business Category into "category".
+- Extract Procedure Name into "procedure".
+- Extract Surgeon into "surgeon".
+- Extract Scheduled column into "scheduledDate".
+- Extract Status column into "salesforceStatus".
+- Time may be blank if no time column is visible.
 - screenshotType should be "account_procedure_history".
-- Use the account name from the page/header/breadcrumb as hospital when visible.
-- date should come from Procedure Date.
-- time can be blank if no time is visible.
-- category should come from Business Category or Product Family Type.
-- procedure should come from Procedure Name.
-- surgeon should come from Surgeon.
-- scheduledDate should come from Scheduled.
-- salesforceStatus should come from Status.
 
-Business rules for Account Procedure History:
-- Scheduled date present + Status Completed:
-  recommendedAction = "mark_existing_fast_tracked_case_reconciled"
-  notes = "Scheduled column has a date and status is Completed. Match to existing fast tracked OR Planner case and mark reconciled. Do not create duplicate."
+Account Procedure History business rules:
+- The Scheduled column controls OR Planner fastTracking. A date in the Scheduled column means fastTracking true/already scheduled in OR Planner. A blank Scheduled column means fastTracking false/not fast tracked.
+- The Status column controls OR Planner reconciled. Status "Completed" means reconciled true. Status "OnSite" means reconciled false.
 
-- Scheduled date present + Status OnSite:
-  recommendedAction = "already_fast_tracked_do_not_duplicate"
-  notes = "Scheduled column has a date and status is OnSite. Already fast tracked; do not create duplicate."
+Recommended action rules for Account Procedure History:
+- If scheduledDate has a visible date AND salesforceStatus is "Completed", set recommendedAction to "reconcile_existing_fast_tracked_case".
+  Notes should say: "Scheduled column has a date and status is Completed. Match existing fast tracked OR Planner case and mark reconciled. Do not create duplicate."
+- If scheduledDate has a visible date AND salesforceStatus is "OnSite", set recommendedAction to "already_fast_tracked_do_not_duplicate".
+  Notes should say: "Scheduled column has a date. Already fast tracked but not reconciled. Do not import duplicate."
+- If scheduledDate is blank AND salesforceStatus is "Completed", set recommendedAction to "import_new_not_fast_tracked_reconciled".
+  Notes should say: "No Scheduled date means this was not fast tracked. Completed in Salesforce means reconciled true. If added to OR Planner, set fastTracking false and reconciled true."
+- If scheduledDate is blank AND salesforceStatus is "OnSite", set recommendedAction to "import_new_not_fast_tracked_unreconciled".
+  Notes should say: "No Scheduled date means this was not fast tracked. OnSite in Salesforce means reconciled false. If added to OR Planner, set fastTracking false and reconciled false."
+- If status is unclear and scheduledDate is blank, set recommendedAction to "needs_review".
 
-- Scheduled date blank + Status Completed:
-  recommendedAction = "import_new_normal_reconciled"
-  notes = "Completed in Salesforce, but Scheduled column is blank. If imported, mark reconciled true and fastTracking false."
-
-- Scheduled date blank + Status OnSite:
-  recommendedAction = "import_new_normal_unreconciled"
-  notes = "OnSite in Salesforce and Scheduled column is blank. If imported, mark reconciled false and fastTracking false."
-
-Important meaning:
-- For Account Procedure History screenshots, the Scheduled column controls fastTracking.
-- If Scheduled has a date, the case was already fast tracked.
-- If Scheduled is blank, the case was NOT fast tracked and should not be imported as fastTracking.
-- The Status column controls reconciled.
-- Completed means reconciled true.
-- OnSite means reconciled false.
-
-General rules:
-- Extract every visible table row.
-- Do not invent missing values.
+General extraction rules:
+- Extract every visible table row from Salesforce desktop/table screenshots.
+- Extract every visible case card/list item from Salesforce mobile/card screenshots.
+- Read rows from top to bottom.
+- Do not merge two rows together.
+- Do not invent missing information.
 - If a cell is unclear, leave it blank and set confidence to "Low".
+- If most of the row is readable but one cell is uncertain, set confidence to "Medium".
 - If the full row is clear, set confidence to "High".
-- Dates should be returned as YYYY-MM-DD when possible.
-- Preserve hospital, procedure, and surgeon names exactly as shown.
-- Ignore browser UI, menus, sidebars, and non-table text.
+- Preserve hospital/account names exactly as shown.
+- Preserve procedure names exactly as shown.
+- Preserve surgeon names exactly as shown.
+- Ignore Salesforce navigation, sidebars, browser UI, bottom mobile navigation, filters, sort controls, and non-case text.
 - If no rows are visible, return { "screenshotType": "unknown", "accountName": "", "cases": [] }.
-              `.trim(),
-            },
-            {
-              type: "input_image",
-              image_url: `data:${mimeType};base64,${base64}`,
-            },
-          ],
-        },
-      ],
+`.trim();
+
+    const openAIResponse = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-5.4-mini",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: prompt },
+              { type: "input_image", image_url: `data:${mimeType};base64,${imageBase64}` },
+            ],
+          },
+        ],
+      }),
     });
 
-    const text = response.output_text || "";
+    const responseJson = await openAIResponse.json();
 
-    let parsed;
-
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.status(500).json({
-        error: "AI returned non-JSON output.",
-        raw: text,
+    if (!openAIResponse.ok) {
+      return res.status(openAIResponse.status).json({
+        error: responseJson?.error?.message || "OpenAI extraction failed.",
+        details: responseJson,
       });
     }
 
-    return res.status(200).json(parsed);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Extraction failed.";
+    const outputText =
+      responseJson.output_text ||
+      responseJson.output?.flatMap((item) => item.content || [])
+        ?.map((content) => content.text || "")
+        ?.join("") ||
+      "";
 
+    try {
+      const parsed = JSON.parse(outputText);
+      return res.status(200).json(parsed);
+    } catch {
+      return res.status(500).json({
+        error: "AI returned non-JSON output.",
+        raw: outputText,
+      });
+    }
+  } catch (error) {
     return res.status(500).json({
-      error: message,
+      error: error instanceof Error ? error.message : "Salesforce extraction failed.",
     });
   }
 }
