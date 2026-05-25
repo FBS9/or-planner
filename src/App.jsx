@@ -1122,7 +1122,7 @@ export default function ORPlannerApp() {
 
     // Scheduled Procedures screen is different from Account Procedure History.
     // These are newly scheduled rows and should become fastTracking cases.
-    if (type.includes("scheduled_procedures")) return "importNew";
+    if (type.includes("scheduled_procedures") || recommended.includes("import_new_fast_tracking")) return "importNew";
 
     // Account Procedure History rule:
     // Scheduled column controls fastTracking. Status controls reconciled.
@@ -1175,6 +1175,18 @@ export default function ORPlannerApp() {
     return "bg-yellow-100 text-yellow-800";
   };
 
+  const sfMatchLabel = (status) => {
+    if (status === "Match") return "Exact Match";
+    if (status === "Possible Match") return "Possible Match";
+    return "No Match";
+  };
+
+  const sfMatchBadgeClass = (status) => {
+    if (status === "Match") return "bg-green-100 text-green-700";
+    if (status === "Possible Match") return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-700";
+  };
+
   const sfPrepareRows = (rows, screenshotType) =>
     rows.map((item, index) => {
       const baseRow = {
@@ -1194,21 +1206,41 @@ export default function ORPlannerApp() {
       };
 
       const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
+      const screenshotKey = normalizeSfKey(screenshotType);
+      const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
+      const isScheduledProceduresRow = screenshotKey.includes("scheduled_procedures") || recommendedKey.includes("import_new_fast_tracking");
       const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
       const matches = sfGetPlannerMatches(baseRow, matchMode);
       const bestMatch = matches[0];
 
-      let action = suggestedAction;
+      let action = "review";
       let selectedPlannerCaseId = "";
 
-      // If the AI/rules know the row should be ignored, preselect Ignore.
-      if (suggestedAction === "ignore") {
+      // Scheduled Procedures rows are clean scheduled-case imports.
+      // If an exact duplicate already exists and is already fast tracked, ignore it.
+      // If an exact duplicate exists but is not fast tracked, mark that existing case fast tracked.
+      // If no match exists and required fields are present, import a new fast tracked case.
+      if (isScheduledProceduresRow) {
+        if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+          action = "review";
+        } else if (bestMatch?.status === "Match") {
+          if (bestMatch.plannerCase.fastTracking) {
+            action = "ignore";
+          } else {
+            action = "markFastTracking";
+            selectedPlannerCaseId = bestMatch.plannerCase.id;
+          }
+        } else if (bestMatch?.status === "Possible Match") {
+          action = "review";
+          selectedPlannerCaseId = bestMatch.plannerCase.id;
+        } else {
+          action = "importNew";
+        }
+      } else if (suggestedAction === "ignore") {
         action = "ignore";
-      }
-
-      // If this row needs to reconcile an existing fast tracked case, only preselect
-      // the reconcile action when we have a confident match. Otherwise keep it in review.
-      if (suggestedAction === "markReconciled") {
+      } else if (suggestedAction === "markReconciled") {
+        // Account History: Scheduled + Completed. Only auto-select reconciliation when
+        // there is a confident existing fast-tracked match.
         if (bestMatch?.status === "Match") {
           action = "markReconciled";
           selectedPlannerCaseId = bestMatch.plannerCase.id;
@@ -1216,23 +1248,25 @@ export default function ORPlannerApp() {
           action = "review";
           selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
         }
-      }
-
-      // If this is a new case import and all key fields are present, preselect import.
-      // If a confident duplicate already exists, preselect updating the existing case instead.
-      // If there is only a possible duplicate, leave it in Needs Review.
-      if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
+      } else if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
+        // Account History rows without Scheduled date are not fast tracked.
+        // If an exact duplicate already exists, update only reconciliation when needed,
+        // otherwise ignore duplicate normal rows.
         if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
           action = "review";
         } else if (bestMatch?.status === "Match") {
-          if (suggestedAction === "importNew" || suggestedAction === "importNewReconciled") {
-            action = suggestedAction === "importNewReconciled" ? "markReconciled" : "markFastTracking";
-          } else if (suggestedAction === "importNewNormalReconciled") {
-            action = "markReconciledOnly";
+          if (suggestedAction === "importNewNormalReconciled") {
+            action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciledOnly";
+            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+          } else if (suggestedAction === "importNewReconciled") {
+            action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciled";
+            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+          } else if (suggestedAction === "importNew") {
+            action = bestMatch.plannerCase.fastTracking ? "ignore" : "markFastTracking";
+            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
           } else {
             action = "ignore";
           }
-          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
         } else if (bestMatch?.status === "Possible Match") {
           action = "review";
           selectedPlannerCaseId = bestMatch.plannerCase.id;
@@ -2327,6 +2361,7 @@ export default function ORPlannerApp() {
                                 <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.suggestedAction)}`}>Suggested: {sfActionLabel(item.suggestedAction)}</div>
                               )}
                               <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.action)}`}>Selected: {sfActionLabel(item.action)}</div>
+                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfMatchBadgeClass(item.matchStatus)}`}>Match: {sfMatchLabel(item.matchStatus)}</div>
                               <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
                             </div>
                           </div>
@@ -2393,7 +2428,7 @@ export default function ORPlannerApp() {
                             )}
 
                             <div className="text-xs text-slate-500 md:col-span-2">
-                              <span className="font-bold text-slate-700">Best match:</span> {item.matchStatus || "No Match"} {item.matchScore ? `(${item.matchScore})` : ""} {item.matchReasons?.length ? `· ${item.matchReasons.join(", ")}` : ""}
+                              <span className="font-bold text-slate-700">Best match:</span> {sfMatchLabel(item.matchStatus)} {item.matchReasons?.length ? `· ${item.matchReasons.join(", ")}` : ""}
                             </div>
                           </div>
                         </div>
