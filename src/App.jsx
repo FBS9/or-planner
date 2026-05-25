@@ -1055,6 +1055,40 @@ export default function ORPlannerApp() {
   const sfIsCompleted = (item) => normalizeSfKey(item.salesforceStatus) === "completed";
   const sfIsOnSite = (item) => normalizeSfKey(item.salesforceStatus) === "onsite";
 
+  const sfSurgeonFacilityOptions = (surgeonName = "") => {
+    const normalizedSurgeon = normalizeSurgeonSearch(surgeonName);
+    if (!normalizedSurgeon) return [];
+
+    return sortedFacilities.filter((facility) =>
+      (surgeonRosters[facility] || []).some((surgeon) => {
+        const rosterName = surgeon?.name || "";
+        const normalizedRosterName = normalizeSurgeonSearch(rosterName);
+        return (
+          normalizedRosterName === normalizedSurgeon ||
+          sfSurgeonScore(rosterName, surgeonName) >= 0.9
+        );
+      })
+    );
+  };
+
+  const sfFacilityFromRowOrSurgeon = (hospital = "", surgeonName = "") => {
+    const visibleFacility = normalizeSfText(hospital);
+    if (visibleFacility) {
+      return { facility: visibleFacility, facilityOptions: [], facilitySource: "salesforce" };
+    }
+
+    const options = sfSurgeonFacilityOptions(surgeonName);
+    if (options.length === 1) {
+      return { facility: options[0], facilityOptions: options, facilitySource: "surgeon_roster" };
+    }
+
+    if (options.length > 1) {
+      return { facility: "", facilityOptions: options, facilitySource: "surgeon_roster_multiple" };
+    }
+
+    return { facility: "", facilityOptions: [], facilitySource: "unknown" };
+  };
+
   const sfFlattenPlannerCases = () =>
     Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
       (dateCases || []).map((item) => ({ ...item, displayDateKey: dateKey }))
@@ -1273,15 +1307,20 @@ export default function ORPlannerApp() {
 
   const sfPrepareRows = (rows, screenshotType) =>
     rows.map((item, index) => {
+      const surgeon = normalizeSfText(item.surgeon);
+      const facilityResolution = sfFacilityFromRowOrSurgeon(item.hospital, surgeon);
+
       const baseRow = {
         id: `sf-row-${Date.now()}-${index}`,
         date: normalizeSfText(item.date),
         dateKey: sfDateToDateKey(item.date),
         time: normalizeSfText(item.time),
-        facility: normalizeSfText(item.hospital),
+        facility: facilityResolution.facility,
+        facilityOptions: facilityResolution.facilityOptions,
+        facilitySource: facilityResolution.facilitySource,
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
-        surgeon: normalizeSfText(item.surgeon),
+        surgeon,
         scheduledDate: normalizeSfText(item.scheduledDate),
         salesforceStatus: normalizeSfText(item.salesforceStatus),
         recommendedAction: normalizeSfText(item.recommendedAction),
@@ -1334,15 +1373,24 @@ export default function ORPlannerApp() {
   const updateSalesforceRow = (id, patch) => {
     const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
     setSfExtractedCases((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              ...patch,
-              actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+
+        const patched = {
+          ...item,
+          ...patch,
+          actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
+        };
+
+        if (!patched.actionManuallyEdited) {
+          return {
+            ...patched,
+            ...sfResolveRowReviewState(patched, sfScreenshotType),
+          };
+        }
+
+        return patched;
+      })
     );
     setSfApplySummary("");
   };
@@ -2318,7 +2366,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2l · desktop image zoom</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2m · account snippet facility picker</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2446,7 +2494,11 @@ export default function ORPlannerApp() {
                           <div className="mt-3 grid gap-2 md:grid-cols-2">
                             <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
                             <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
-                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
+                            <div>
+                              <span className="font-bold">Facility:</span> {item.facility || (item.facilityOptions?.length > 1 ? "Select below" : "—")}
+                              {item.facilitySource === "surgeon_roster" && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from surgeon roster</span>}
+                              {item.facilityOptions?.length > 1 && <span className="ml-2 rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-bold text-yellow-800">multiple affiliations</span>}
+                            </div>
                             <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
                             <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
                             {(item.scheduledDate || item.salesforceStatus) && (
@@ -2467,6 +2519,22 @@ export default function ORPlannerApp() {
                           </div>
 
                           <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
+                            {(item.facilityOptions?.length > 1 || (!item.facility && item.surgeon)) && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Facility</span>
+                                <select
+                                  value={item.facility || ""}
+                                  onChange={(event) => updateSalesforceRow(item.id, { facility: event.target.value })}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Select facility</option>
+                                  {(item.facilityOptions?.length ? item.facilityOptions : sortedFacilities).map((facility) => (
+                                    <option key={`${item.id}-${facility}`} value={facility}>{facility}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+
                             <label className="block">
                               <span className="mb-1 block text-xs font-bold text-slate-500">Review Action</span>
                               <select
