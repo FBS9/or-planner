@@ -1287,7 +1287,7 @@ export default function ORPlannerApp() {
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="space-y-4 p-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-xl font-bold">{selectedDayName}</h2>
                   <p className="text-sm text-slate-500">{formatLongDate(selectedDate)}</p>
                   <div className="mt-3 flex items-center gap-2">
@@ -1316,13 +1316,13 @@ export default function ORPlannerApp() {
                     </button>
                   </div>
                 </div>
-                <div className={`flex gap-2 ${isDesktopLayout ? "hidden" : isMobileLayout ? "inline-flex" : "md:hidden"}`}>
+                <div className="grid max-w-[150px] shrink-0 grid-cols-1 gap-2 sm:max-w-[210px] sm:grid-cols-2">
                   <button
                     onClick={() => {
                       setShowSalesforceImport((prev) => !prev);
                       setShowMobileAddCase(false);
                     }}
-                    className={`rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${showSalesforceImport ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700 ring-1 ring-blue-200"}`}
+                    className={`h-9 min-w-0 rounded-xl px-2 text-xs font-semibold shadow-sm ${showSalesforceImport ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700 ring-1 ring-blue-200"}`}
                   >
                     {showSalesforceImport ? "Close SF" : "SF Import"}
                   </button>
@@ -1331,7 +1331,7 @@ export default function ORPlannerApp() {
                       setShowMobileAddCase((prev) => !prev);
                       setShowSalesforceImport(false);
                     }}
-                    className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm"
+                    className={`h-9 min-w-0 rounded-xl bg-slate-900 px-2 text-xs font-semibold text-white shadow-sm ${isDesktopLayout ? "hidden" : isMobileLayout ? "block" : "md:hidden"}`}
                   >
                     {showMobileAddCase ? "Close" : "Add Case"}
                   </button>
@@ -1382,7 +1382,7 @@ export default function ORPlannerApp() {
               </div>
 
               {showSalesforceImport && (
-                <div className="space-y-3 rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                <div className="w-full space-y-3 rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
                   <div>
                     <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
                     <p className="mt-1 text-xs text-blue-700">
