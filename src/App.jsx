@@ -237,6 +237,13 @@ export default function ORPlannerApp() {
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showSalesforceImport, setShowSalesforceImport] = useState(false);
+  const [sfFile, setSfFile] = useState(null);
+  const [sfPreviewUrl, setSfPreviewUrl] = useState("");
+  const [sfLoading, setSfLoading] = useState(false);
+  const [sfError, setSfError] = useState("");
+  const [sfScreenshotType, setSfScreenshotType] = useState("");
+  const [sfAccountName, setSfAccountName] = useState("");
+  const [sfExtractedCases, setSfExtractedCases] = useState([]);
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
@@ -979,6 +986,105 @@ export default function ORPlannerApp() {
     URL.revokeObjectURL(url);
   };
 
+  const normalizeSfText = (value = "") =>
+    String(value || "").replace(/\s+/g, " ").trim();
+
+  const sfDateToDateKey = (value = "") => {
+    const text = normalizeSfText(value);
+    const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (!match) return text;
+    const [, month, day, year] = match;
+    const fullYear = year.length === 2 ? `20${year}` : year;
+    return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  };
+
+  const resetSalesforceImport = () => {
+    setSfFile(null);
+    setSfPreviewUrl("");
+    setSfLoading(false);
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+  };
+
+  const handleSalesforceFileChange = (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+
+    setSfFile(selectedFile);
+    setSfPreviewUrl(URL.createObjectURL(selectedFile));
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+  };
+
+  const extractSalesforceCases = async () => {
+    if (!sfFile) {
+      setSfError("Upload a Salesforce screenshot first.");
+      return;
+    }
+
+    setSfLoading(true);
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Could not read the screenshot file."));
+        reader.readAsDataURL(sfFile);
+      });
+
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+
+      const response = await fetch("/api/extract-salesforce-cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mimeType: sfFile.type || "image/png",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "AI extraction failed.");
+      }
+
+      const rows = Array.isArray(data.cases) ? data.cases : [];
+
+      setSfScreenshotType(data.screenshotType || "unknown");
+      setSfAccountName(data.accountName || "");
+      setSfExtractedCases(
+        rows.map((item, index) => ({
+          id: `sf-row-${Date.now()}-${index}`,
+          date: normalizeSfText(item.date),
+          dateKey: sfDateToDateKey(item.date),
+          time: normalizeSfText(item.time),
+          facility: normalizeSfText(item.hospital),
+          category: normalizeSfText(item.category),
+          procedure: normalizeSfText(item.procedure),
+          surgeon: normalizeSfText(item.surgeon),
+          scheduledDate: normalizeSfText(item.scheduledDate),
+          salesforceStatus: normalizeSfText(item.salesforceStatus),
+          recommendedAction: normalizeSfText(item.recommendedAction),
+          confidence: normalizeSfText(item.confidence || "Medium"),
+          notes: normalizeSfText(item.notes),
+        }))
+      );
+    } catch (error) {
+      setSfError(error instanceof Error ? error.message : "Something went wrong extracting Salesforce cases.");
+    } finally {
+      setSfLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
       <div className="mx-auto max-w-7xl space-y-4">
@@ -1382,29 +1488,101 @@ export default function ORPlannerApp() {
               </div>
 
               {showSalesforceImport && (
-                <div className="w-full space-y-3 rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
-                  <div>
-                    <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
-                    <p className="mt-1 text-xs text-blue-700">
-                      This is where the Salesforce screenshot workflow will live. Next step is wiring the OCR import/reconcile logic into this panel.
-                    </p>
+                <div className="w-full space-y-3 overflow-hidden rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
+                      <p className="mt-1 text-xs text-blue-700">
+                        Upload a Salesforce screenshot and extract rows with AI. For now, this safely shows the extracted rows without changing your planner.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={resetSalesforceImport}
+                      className="shrink-0 rounded-xl bg-white px-2 py-1 text-xs font-bold text-blue-700 ring-1 ring-blue-100"
+                    >
+                      Reset
+                    </button>
                   </div>
 
-                  <div className="grid gap-2 rounded-2xl bg-white p-3 text-xs text-slate-600 ring-1 ring-blue-100">
-                    <div className="font-bold text-slate-800">Planned workflow</div>
-                    <div>1. Upload Salesforce screenshot</div>
-                    <div>2. Extract cases with AI</div>
-                    <div>3. Review matches before applying</div>
-                    <div>4. Import new fast tracked cases or reconcile existing ones</div>
-                  </div>
+                  <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-4 text-center text-sm font-bold text-blue-800">
+                    <Upload className="mb-2 h-5 w-5" />
+                    {sfFile ? sfFile.name : "Upload Salesforce screenshot"}
+                    <span className="mt-1 text-xs font-medium text-blue-500">PNG, JPG, JPEG, or WEBP</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      onChange={handleSalesforceFileChange}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {sfPreviewUrl && (
+                    <img
+                      src={sfPreviewUrl}
+                      alt="Salesforce screenshot preview"
+                      className="max-h-48 w-full rounded-2xl border border-blue-100 bg-white object-contain"
+                    />
+                  )}
 
                   <button
                     type="button"
-                    disabled
-                    className="w-full rounded-2xl bg-blue-200 px-4 py-3 text-sm font-bold text-blue-800 opacity-70"
+                    onClick={extractSalesforceCases}
+                    disabled={!sfFile || sfLoading}
+                    className="w-full rounded-2xl bg-blue-700 px-4 py-3 text-sm font-bold text-white shadow-sm disabled:opacity-50"
                   >
-                    Salesforce OCR coming next
+                    {sfLoading ? "Extracting with AI..." : "Extract Cases with AI"}
                   </button>
+
+                  {sfError && (
+                    <div className="rounded-2xl bg-red-50 p-3 text-xs font-semibold text-red-700 ring-1 ring-red-100">
+                      {sfError}
+                    </div>
+                  )}
+
+                  {(sfScreenshotType || sfExtractedCases.length > 0) && (
+                    <div className="rounded-2xl bg-white p-3 text-xs text-slate-600 ring-1 ring-blue-100">
+                      <div className="font-bold text-slate-900">Extraction Result</div>
+                      <div className="mt-1">Type: <span className="font-semibold">{sfScreenshotType || "unknown"}</span></div>
+                      {sfAccountName && <div>Account: <span className="font-semibold">{sfAccountName}</span></div>}
+                      <div>Rows found: <span className="font-semibold">{sfExtractedCases.length}</span></div>
+                    </div>
+                  )}
+
+                  {sfExtractedCases.length > 0 && (
+                    <div className="space-y-2">
+                      {sfExtractedCases.map((item, index) => (
+                        <div key={item.id} className="rounded-2xl bg-white p-3 text-xs text-slate-700 ring-1 ring-blue-100">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-bold text-slate-900">Row {index + 1}</div>
+                            <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">{item.confidence}</div>
+                          </div>
+                          <div className="mt-2 grid gap-1">
+                            <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
+                            <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
+                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
+                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
+                            <div><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
+                            {(item.scheduledDate || item.salesforceStatus) && (
+                              <div><span className="font-bold">SF:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}</div>
+                            )}
+                            {item.recommendedAction && <div><span className="font-bold">AI Action:</span> {item.recommendedAction}</div>}
+                            {item.notes && <div className="text-slate-500"><span className="font-bold">Notes:</span> {item.notes}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {sfExtractedCases.length > 0 && (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full rounded-2xl bg-slate-200 px-4 py-3 text-sm font-bold text-slate-500"
+                    >
+                      Apply to OR Planner coming next
+                    </button>
+                  )}
                 </div>
               )}
 
