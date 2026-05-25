@@ -1101,10 +1101,10 @@ export default function ORPlannerApp() {
 
   const sfAddSurgeonToRosterFromRow = (row) => {
     const facility = normalizeSfText(row?.facility);
-    const surgeonName = normalizeSfText(row?.surgeon);
+    const surgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
     if (!facility || !surgeonName) return;
 
-    const subspecialty = normalizeSfText(row?.category);
+    const subspecialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category);
 
     setFacilities((prev) =>
       prev.some((existing) => existing.toLowerCase() === facility.toLowerCase())
@@ -1114,8 +1114,17 @@ export default function ORPlannerApp() {
 
     setSurgeonRosters((prev) => {
       const current = prev[facility] || [];
-      if (current.some((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(surgeonName))) {
-        return prev;
+      const existingIndex = current.findIndex((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(surgeonName));
+
+      if (existingIndex >= 0) {
+        const updatedRoster = current.map((surgeon, index) =>
+          index === existingIndex ? { ...surgeon, name: surgeonName, subspecialty } : surgeon
+        );
+
+        return {
+          ...prev,
+          [facility]: updatedRoster.sort((a, b) => a.name.localeCompare(b.name)),
+        };
       }
 
       return {
@@ -1127,6 +1136,12 @@ export default function ORPlannerApp() {
     if (isGrowthSpecialty(subspecialty)) {
       setGrowthSurgeons((prev) => (prev.includes(surgeonName) ? prev : [...prev, surgeonName]));
     }
+
+    updateSalesforceRow(row.id, {
+      surgeon: surgeonName,
+      rosterSurgeonName: surgeonName,
+      rosterSurgeonSubspecialty: subspecialty,
+    });
 
     setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster.`);
   };
@@ -1372,6 +1387,8 @@ export default function ORPlannerApp() {
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
         surgeon,
+        rosterSurgeonName: surgeon,
+        rosterSurgeonSubspecialty: normalizeSfText(item.category),
         scheduledDate: normalizeSfText(item.scheduledDate),
         salesforceStatus: normalizeSfText(item.salesforceStatus),
         recommendedAction: normalizeSfText(item.recommendedAction),
@@ -2417,7 +2434,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2o · snippet surgeon add</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2p · custom surgeon add</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2590,15 +2607,39 @@ export default function ORPlannerApp() {
                               <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-100 md:col-span-2">
                                 <div className="font-bold">Surgeon not in this facility roster</div>
                                 <div className="mt-1">
-                                  {item.surgeon} is not currently saved under {item.facility}. Add them before applying if this affiliation is correct.
+                                  {item.surgeon} is not currently saved under {item.facility}. Confirm how you want the surgeon saved before applying.
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => sfAddSurgeonToRosterFromRow(item)}
-                                  className="mt-2 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700"
-                                >
-                                  Add {item.surgeon} to {item.facility} roster
-                                </button>
+
+                                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-amber-800">Save surgeon as</span>
+                                    <input
+                                      value={item.rosterSurgeonName || item.surgeon || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { rosterSurgeonName: event.target.value })}
+                                      className="input bg-white text-sm"
+                                      placeholder="Surgeon name for roster"
+                                    />
+                                  </label>
+
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-amber-800">Subspecialty</span>
+                                    <input
+                                      value={item.rosterSurgeonSubspecialty || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { rosterSurgeonSubspecialty: event.target.value })}
+                                      className="input bg-white text-sm"
+                                      placeholder="Ex: General Surgery"
+                                    />
+                                  </label>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => sfAddSurgeonToRosterFromRow(item)}
+                                    disabled={!normalizeSfText(item.rosterSurgeonName || item.surgeon)}
+                                    className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Add to roster
+                                  </button>
+                                </div>
                               </div>
                             )}
 
