@@ -1,5 +1,11 @@
 import OpenAI from "openai";
 
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -9,7 +15,7 @@ function readRawBody(req) {
     const chunks = [];
 
     req.on("data", (chunk) => {
-      chunks.push(chunk);
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
 
     req.on("end", () => {
@@ -18,6 +24,17 @@ function readRawBody(req) {
 
     req.on("error", reject);
   });
+}
+
+function parseDataUrl(value = "") {
+  const match = String(value).match(/^data:([^;]+);base64,(.+)$/);
+
+  if (!match) return null;
+
+  return {
+    mimeType: match[1],
+    buffer: Buffer.from(match[2], "base64"),
+  };
 }
 
 function extractMultipartFile(buffer, contentType) {
@@ -41,15 +58,29 @@ function extractMultipartFile(buffer, contentType) {
     start = next;
   }
 
-  const filePart = parts.find((part) =>
-    part.toString("latin1", 0, Math.min(part.length, 1000)).includes('name="image"')
-  );
+  const filePart = parts.find((part) => {
+    const headerPreview = part.toString(
+      "latin1",
+      0,
+      Math.min(part.length, 1500)
+    );
+
+    return (
+      headerPreview.includes('name="image"') ||
+      headerPreview.includes('name="file"') ||
+      headerPreview.includes('name="screenshot"') ||
+      headerPreview.includes("Content-Type: image/")
+    );
+  });
 
   if (!filePart) {
-    throw new Error("No uploaded image found.");
+    throw new Error(
+      'No uploaded image found. Expected multipart field named "image", "file", or "screenshot".'
+    );
   }
 
   const headerEnd = filePart.indexOf(Buffer.from("\r\n\r\n"));
+
   if (headerEnd === -1) {
     throw new Error("Invalid multipart image upload.");
   }
@@ -74,6 +105,73 @@ function extractMultipartFile(buffer, contentType) {
   };
 }
 
+function extractJsonImage(buffer) {
+  const text = buffer.toString("utf8");
+  const body = JSON.parse(text);
+
+  const possibleDataUrl =
+    body.imageUrl ||
+    body.dataUrl ||
+    body.imageDataUrl ||
+    body.screenshotDataUrl ||
+    body.image;
+
+  if (typeof possibleDataUrl === "string") {
+    const parsedDataUrl = parseDataUrl(possibleDataUrl);
+
+    if (parsedDataUrl) {
+      return parsedDataUrl;
+    }
+  }
+
+  const possibleBase64 =
+    body.imageBase64 ||
+    body.base64 ||
+    body.screenshotBase64 ||
+    body.fileBase64;
+
+  if (typeof possibleBase64 === "string") {
+    return {
+      mimeType: body.mimeType || body.type || "image/png",
+      buffer: Buffer.from(
+        possibleBase64.replace(/^data:[^;]+;base64,/, ""),
+        "base64"
+      ),
+    };
+  }
+
+  throw new Error(
+    "JSON request did not include imageBase64, base64, imageUrl, dataUrl, or image."
+  );
+}
+
+async function getImageFromRequest(req) {
+  const contentType = req.headers["content-type"] || "";
+  const rawBody = await readRawBody(req);
+
+  if (!rawBody.length) {
+    throw new Error("No request body received.");
+  }
+
+  if (contentType.includes("multipart/form-data")) {
+    return extractMultipartFile(rawBody, contentType);
+  }
+
+  if (contentType.includes("application/json")) {
+    return extractJsonImage(rawBody);
+  }
+
+  const dataUrl = parseDataUrl(rawBody.toString("utf8"));
+
+  if (dataUrl) {
+    return dataUrl;
+  }
+
+  throw new Error(
+    `Unsupported upload format: ${contentType || "missing content-type"}`
+  );
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -86,22 +184,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const contentType = req.headers["content-type"] || "";
-
-    let imageBuffer;
-    let mimeType;
-
-    if (contentType.includes("multipart/form-data")) {
-      const rawBody = await readRawBody(req);
-      const extracted = extractMultipartFile(rawBody, contentType);
-      imageBuffer = extracted.buffer;
-      mimeType = extracted.mimeType;
-    } else {
-      return res.status(400).json({
-        error: "Expected multipart/form-data with an image field.",
-      });
-    }
-
+    const { buffer: imageBuffer, mimeType } = await getImageFromRequest(req);
     const base64 = imageBuffer.toString("base64");
 
     const response = await openai.responses.create({
@@ -237,7 +320,11 @@ General rules:
 
     return res.status(200).json(parsed);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Extraction failed.";
-    return res.status(500).json({ error: message });
+    const message =
+      error instanceof Error ? error.message : "Extraction failed.";
+
+    return res.status(500).json({
+      error: message,
+    });
   }
 }
