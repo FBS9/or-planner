@@ -1187,6 +1187,87 @@ export default function ORPlannerApp() {
     return "bg-red-100 text-red-700";
   };
 
+  const sfResolveRowReviewState = (baseRow, screenshotType) => {
+    const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
+    const screenshotKey = normalizeSfKey(screenshotType);
+    const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
+    const isScheduledProceduresRow = screenshotKey.includes("scheduled_procedures") || recommendedKey.includes("import_new_fast_tracking");
+    const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
+    const matches = sfGetPlannerMatches(baseRow, matchMode);
+    const bestMatch = matches[0];
+
+    let action = "review";
+    let selectedPlannerCaseId = "";
+
+    // Scheduled Procedures rows are clean scheduled-case imports.
+    // If an exact duplicate already exists and is already fast tracked, ignore it.
+    // If an exact duplicate exists but is not fast tracked, mark that existing case fast tracked.
+    // If no match exists and required fields are present, import a new fast tracked case.
+    if (isScheduledProceduresRow) {
+      if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+        action = "review";
+      } else if (bestMatch?.status === "Match") {
+        if (bestMatch.plannerCase.fastTracking) {
+          action = "ignore";
+        } else {
+          action = "markFastTracking";
+          selectedPlannerCaseId = bestMatch.plannerCase.id;
+        }
+      } else if (bestMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = "importNew";
+      }
+    } else if (suggestedAction === "ignore") {
+      action = "ignore";
+    } else if (suggestedAction === "markReconciled") {
+      // Account History: Scheduled + Completed. Only auto-select reconciliation when
+      // there is a confident existing fast-tracked match.
+      if (bestMatch?.status === "Match") {
+        action = "markReconciled";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = "review";
+        selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
+      }
+    } else if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
+      // Account History rows without Scheduled date are not fast tracked.
+      // If an exact duplicate already exists, update only reconciliation when needed,
+      // otherwise ignore duplicate normal rows.
+      if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+        action = "review";
+      } else if (bestMatch?.status === "Match") {
+        if (suggestedAction === "importNewNormalReconciled") {
+          action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciledOnly";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else if (suggestedAction === "importNewReconciled") {
+          action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciled";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else if (suggestedAction === "importNew") {
+          action = bestMatch.plannerCase.fastTracking ? "ignore" : "markFastTracking";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else {
+          action = "ignore";
+        }
+      } else if (bestMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = suggestedAction;
+      }
+    }
+
+    return {
+      suggestedAction,
+      action,
+      selectedPlannerCaseId,
+      matchStatus: bestMatch?.status || "No Match",
+      matchScore: bestMatch?.score || 0,
+      matchReasons: bestMatch?.reasons || [],
+    };
+  };
+
   const sfPrepareRows = (rows, screenshotType) =>
     rows.map((item, index) => {
       const baseRow = {
@@ -1203,91 +1284,57 @@ export default function ORPlannerApp() {
         recommendedAction: normalizeSfText(item.recommendedAction),
         confidence: normalizeSfText(item.confidence || "Medium"),
         notes: normalizeSfText(item.notes),
+        actionManuallyEdited: false,
       };
-
-      const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
-      const screenshotKey = normalizeSfKey(screenshotType);
-      const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
-      const isScheduledProceduresRow = screenshotKey.includes("scheduled_procedures") || recommendedKey.includes("import_new_fast_tracking");
-      const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
-      const matches = sfGetPlannerMatches(baseRow, matchMode);
-      const bestMatch = matches[0];
-
-      let action = "review";
-      let selectedPlannerCaseId = "";
-
-      // Scheduled Procedures rows are clean scheduled-case imports.
-      // If an exact duplicate already exists and is already fast tracked, ignore it.
-      // If an exact duplicate exists but is not fast tracked, mark that existing case fast tracked.
-      // If no match exists and required fields are present, import a new fast tracked case.
-      if (isScheduledProceduresRow) {
-        if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
-          action = "review";
-        } else if (bestMatch?.status === "Match") {
-          if (bestMatch.plannerCase.fastTracking) {
-            action = "ignore";
-          } else {
-            action = "markFastTracking";
-            selectedPlannerCaseId = bestMatch.plannerCase.id;
-          }
-        } else if (bestMatch?.status === "Possible Match") {
-          action = "review";
-          selectedPlannerCaseId = bestMatch.plannerCase.id;
-        } else {
-          action = "importNew";
-        }
-      } else if (suggestedAction === "ignore") {
-        action = "ignore";
-      } else if (suggestedAction === "markReconciled") {
-        // Account History: Scheduled + Completed. Only auto-select reconciliation when
-        // there is a confident existing fast-tracked match.
-        if (bestMatch?.status === "Match") {
-          action = "markReconciled";
-          selectedPlannerCaseId = bestMatch.plannerCase.id;
-        } else {
-          action = "review";
-          selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
-        }
-      } else if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
-        // Account History rows without Scheduled date are not fast tracked.
-        // If an exact duplicate already exists, update only reconciliation when needed,
-        // otherwise ignore duplicate normal rows.
-        if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
-          action = "review";
-        } else if (bestMatch?.status === "Match") {
-          if (suggestedAction === "importNewNormalReconciled") {
-            action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciledOnly";
-            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
-          } else if (suggestedAction === "importNewReconciled") {
-            action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciled";
-            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
-          } else if (suggestedAction === "importNew") {
-            action = bestMatch.plannerCase.fastTracking ? "ignore" : "markFastTracking";
-            selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
-          } else {
-            action = "ignore";
-          }
-        } else if (bestMatch?.status === "Possible Match") {
-          action = "review";
-          selectedPlannerCaseId = bestMatch.plannerCase.id;
-        } else {
-          action = suggestedAction;
-        }
-      }
 
       return {
         ...baseRow,
-        suggestedAction,
-        action,
-        selectedPlannerCaseId,
-        matchStatus: bestMatch?.status || "No Match",
-        matchScore: bestMatch?.score || 0,
-        matchReasons: bestMatch?.reasons || [],
+        ...sfResolveRowReviewState(baseRow, screenshotType),
       };
     });
 
+  useEffect(() => {
+    if (!sfExtractedCases.length || !sfScreenshotType) return;
+
+    setSfExtractedCases((prev) => {
+      let changed = false;
+
+      const next = prev.map((item) => {
+        if (item.actionManuallyEdited) return item;
+
+        const resolved = sfResolveRowReviewState(item, sfScreenshotType);
+        const updated = { ...item, ...resolved };
+
+        if (
+          updated.action !== item.action ||
+          updated.selectedPlannerCaseId !== item.selectedPlannerCaseId ||
+          updated.matchStatus !== item.matchStatus ||
+          updated.matchScore !== item.matchScore ||
+          JSON.stringify(updated.matchReasons || []) !== JSON.stringify(item.matchReasons || [])
+        ) {
+          changed = true;
+        }
+
+        return updated;
+      });
+
+      return changed ? next : prev;
+    });
+  }, [casesByDate, sfScreenshotType, sfExtractedCases.length]);
+
   const updateSalesforceRow = (id, patch) => {
-    setSfExtractedCases((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
+    setSfExtractedCases((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...patch,
+              actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
+            }
+          : item
+      )
+    );
     setSfApplySummary("");
   };
 
