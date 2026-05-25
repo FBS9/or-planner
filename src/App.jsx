@@ -2092,17 +2092,19 @@ export default function ORPlannerApp() {
               </div>
             </div>
             {showRosterList && (
-              <div className="mt-3 overflow-hidden rounded-2xl bg-slate-100 p-2">
+              <div className="mt-3 w-full min-w-0 overflow-hidden rounded-2xl bg-slate-100 p-2">
                 {selectedRoster.length === 0 ? (
                   <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No doctors saved for {rosterFacility} yet.</div>
                 ) : (
-                  <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {selectedRoster.map((surgeon) => (
-                      <div key={surgeon.name} className="flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
+                      <div key={surgeon.name} className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-medium ring-1 ring-slate-200">
                         <button onClick={() => toggleGrowthSurgeon(surgeon.name)} className={`shrink-0 rounded-xl px-2 py-1 text-xs font-bold ${growthSurgeons.includes(surgeon.name) ? "bg-slate-900 text-white" : "bg-slate-50 text-slate-500 ring-1 ring-slate-200"}`} title="Toggle automatic Growth">Growth</button>
-                        <span className="min-w-0 flex-1 truncate">{surgeon.name}</span>
-                        {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="min-w-0 max-w-full truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.facility}</span>}
-                        {surgeon.subspecialty && <span className="min-w-0 max-w-full truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{surgeon.subspecialty}</span>}
+                        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                          <span className="min-w-0 truncate whitespace-nowrap" title={surgeon.name}>{surgeon.name}</span>
+                          {rosterFacility === ALL_SURGEONS && surgeon.facility && <span className="hidden max-w-[35%] shrink truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={surgeon.facility}>{surgeon.facility}</span>}
+                          {surgeon.subspecialty && <span className="max-w-[42%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200" title={surgeon.subspecialty}>{surgeon.subspecialty}</span>}
+                        </div>
                         <button onClick={() => removeSurgeonFromRoster(surgeon.facility || rosterFacility, surgeon.name)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${surgeon.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     ))}
@@ -2581,7 +2583,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2u · hide system notes</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2w · roster inline mobile actions</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
