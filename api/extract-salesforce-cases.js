@@ -278,12 +278,20 @@ Business rules for Account Procedure History:
   notes = "Scheduled column has a date and status is OnSite. Already fast tracked; do not create duplicate."
 
 - Scheduled date blank + Status Completed:
-  recommendedAction = "import_new_fast_tracking_reconciled"
-  notes = "Completed in Salesforce. If imported, mark fastTracking true and reconciled true."
+  recommendedAction = "import_new_normal_reconciled"
+  notes = "Completed in Salesforce, but Scheduled column is blank. If imported, mark reconciled true and fastTracking false."
 
 - Scheduled date blank + Status OnSite:
-  recommendedAction = "import_new_fast_tracking_unreconciled"
-  notes = "OnSite in Salesforce. If imported, mark fastTracking true and reconciled false."
+  recommendedAction = "import_new_normal_unreconciled"
+  notes = "OnSite in Salesforce and Scheduled column is blank. If imported, mark reconciled false and fastTracking false."
+
+Important meaning:
+- For Account Procedure History screenshots, the Scheduled column controls fastTracking.
+- If Scheduled has a date, the case was already fast tracked.
+- If Scheduled is blank, the case was NOT fast tracked and should not be imported as fastTracking.
+- The Status column controls reconciled.
+- Completed means reconciled true.
+- OnSite means reconciled false.
 
 General rules:
 - Extract every visible table row.
