@@ -2434,7 +2434,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2p · custom surgeon add</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2q · incomplete row facility select</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2587,7 +2587,7 @@ export default function ORPlannerApp() {
                           </div>
 
                           <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
-                            {(item.facilityOptions?.length > 1 || (!item.facility && item.surgeon)) && (
+                            {(item.facilityOptions?.length > 1 || !item.facility) && (
                               <label className="block">
                                 <span className="mb-1 block text-xs font-bold text-slate-500">Facility</span>
                                 <select
@@ -2601,6 +2601,18 @@ export default function ORPlannerApp() {
                                   ))}
                                 </select>
                               </label>
+                            )}
+
+                            {(!item.surgeon || !item.procedure) && item.dateKey && (
+                              <div className="rounded-2xl bg-blue-50 p-3 text-xs text-blue-900 ring-1 ring-blue-100 md:col-span-2">
+                                <div className="font-bold">Incomplete Salesforce row</div>
+                                <div className="mt-1">
+                                  This row is missing {[
+                                    !item.surgeon ? "surgeon" : "",
+                                    !item.procedure ? "procedure" : "",
+                                  ].filter(Boolean).join(" and ")}. Select the facility and keep an import action selected if you want to add it as a placeholder case to investigate later.
+                                </div>
+                              </div>
                             )}
 
                             {item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon) && (
