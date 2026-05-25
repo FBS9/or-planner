@@ -3156,7 +3156,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3i · facility + last-name roster matching</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3j · fit screenshot zoom to screen</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3494,11 +3494,11 @@ export default function ORPlannerApp() {
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-auto rounded-3xl bg-white p-3">
+              <div className="min-h-0 flex-1 overflow-hidden rounded-3xl bg-white p-3">
                 <img
                   src={sfPreviewUrl}
                   alt="Salesforce screenshot enlarged desktop reference"
-                  className="mx-auto min-h-full max-w-none rounded-2xl object-contain"
+                  className="h-full max-h-full w-full max-w-full rounded-2xl object-contain"
                 />
               </div>
             </div>
