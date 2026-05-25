@@ -1316,7 +1316,7 @@ export default function ORPlannerApp() {
                     </button>
                   </div>
                 </div>
-                <div className="grid w-[210px] shrink-0 grid-cols-2 gap-2">
+                <div className="ml-auto grid w-full grid-cols-2 gap-2 sm:w-[210px]">
                   <button
                     onClick={() => {
                       setShowSalesforceImport((prev) => !prev);
