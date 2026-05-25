@@ -512,31 +512,24 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     const nextSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
-    latestLocalCloudSnapshotRef.current = nextSnapshotString;
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
-  useEffect(() => {
-    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+    // Only mark this device dirty when the actual planner data changed locally.
+    // Do NOT mark dirty just because the user tapped/scrolled/clicked somewhere.
+    // That was allowing an idle/stale phone to keep pushing old checkbox states
+    // back over newer desktop changes.
+    if (!latestLocalCloudSnapshotRef.current) {
+      latestLocalCloudSnapshotRef.current = nextSnapshotString;
+      return;
+    }
 
-    const markLocalDirty = (event) => {
-      if (isApplyingCloudRef.current) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('[data-cloud-sync-ignore="true"]')) return;
-      localDirtyRef.current = true;
-      lastLocalEditAtRef.current = Date.now();
-    };
-
-    document.addEventListener("input", markLocalDirty, true);
-    document.addEventListener("change", markLocalDirty, true);
-    document.addEventListener("click", markLocalDirty, true);
-
-    return () => {
-      document.removeEventListener("input", markLocalDirty, true);
-      document.removeEventListener("change", markLocalDirty, true);
-      document.removeEventListener("click", markLocalDirty, true);
-    };
-  }, [plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+    if (nextSnapshotString !== latestLocalCloudSnapshotRef.current) {
+      latestLocalCloudSnapshotRef.current = nextSnapshotString;
+      if (!isApplyingCloudRef.current && autoCloudReady && cloudSession?.user?.id) {
+        localDirtyRef.current = true;
+        lastLocalEditAtRef.current = Date.now();
+      }
+    }
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -660,7 +653,7 @@ export default function ORPlannerApp() {
     window.setTimeout(() => {
       isApplyingCloudRef.current = false;
       setAutoCloudReady(true);
-    }, 0);
+    }, 400);
     setCloudSyncActivity(activityLabel);
   };
 
@@ -780,7 +773,7 @@ export default function ORPlannerApp() {
             return;
           }
 
-          if (hasUnsavedLocalWork && localEditIsFresh) return;
+          if (localEditIsFresh) return;
 
           setCloudSyncActivity("Live sync...");
           applyCloudPlannerData(incoming.planner_data, incoming.updated_at, "Synced");
@@ -829,7 +822,7 @@ export default function ORPlannerApp() {
             // Only let this device push local data when it has a truly fresh edit.
             // If the phone is idle, stale, or just holding old local data, pull cloud instead.
             // This makes desktop changes appear on mobile without needing Sync Now.
-            if (hasUnsavedLocalWork && localEditIsFresh) {
+            if (localEditIsFresh) {
               setCloudSyncActivity("Auto-saving...");
               await performCloudSave({ silent: true });
               return;
@@ -847,7 +840,7 @@ export default function ORPlannerApp() {
           return;
         }
 
-        if (hasUnsavedLocalWork && localEditIsFresh) {
+        if (localEditIsFresh) {
           setCloudSyncActivity("Auto-saving...");
           await performCloudSave({ silent: true });
         } else {
@@ -3378,7 +3371,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3s · idle mobile auto-pull sync</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3t · no stale mobile push sync</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
