@@ -1089,6 +1089,48 @@ export default function ORPlannerApp() {
     return { facility: "", facilityOptions: [], facilitySource: "unknown" };
   };
 
+  const sfSurgeonExistsInFacility = (facility = "", surgeonName = "") => {
+    const normalizedFacility = normalizeSfText(facility);
+    const normalizedSurgeon = normalizeSurgeonSearch(surgeonName);
+    if (!normalizedFacility || !normalizedSurgeon) return false;
+
+    return (surgeonRosters[normalizedFacility] || []).some((surgeon) =>
+      normalizeSurgeonSearch(surgeon?.name || "") === normalizedSurgeon
+    );
+  };
+
+  const sfAddSurgeonToRosterFromRow = (row) => {
+    const facility = normalizeSfText(row?.facility);
+    const surgeonName = normalizeSfText(row?.surgeon);
+    if (!facility || !surgeonName) return;
+
+    const subspecialty = normalizeSfText(row?.category);
+
+    setFacilities((prev) =>
+      prev.some((existing) => existing.toLowerCase() === facility.toLowerCase())
+        ? prev
+        : [...prev, facility].sort((a, b) => a.localeCompare(b))
+    );
+
+    setSurgeonRosters((prev) => {
+      const current = prev[facility] || [];
+      if (current.some((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(surgeonName))) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [facility]: [...current, { name: surgeonName, subspecialty }].sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    });
+
+    if (isGrowthSpecialty(subspecialty)) {
+      setGrowthSurgeons((prev) => (prev.includes(surgeonName) ? prev : [...prev, surgeonName]));
+    }
+
+    setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster.`);
+  };
+
   const sfFlattenPlannerCases = () =>
     Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
       (dateCases || []).map((item) => ({ ...item, displayDateKey: dateKey }))
@@ -1105,6 +1147,9 @@ export default function ORPlannerApp() {
     const procedureScore = sfSimilarityScore(sfCase.procedure, plannerCase.procedure);
     const timeDiff = sfTimeDifferenceMinutes(sfCase.time, plannerCase.time);
     const hasBothTimes = parseTimeToMinutes(sfCase.time) !== null && parseTimeToMinutes(plannerCase.time) !== null;
+    const identityMatches = facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5;
+    const timeIsTight = hasBothTimes && timeDiff !== null && timeDiff <= 15;
+    const timeIsReasonable = hasBothTimes && timeDiff !== null && timeDiff <= 30;
 
     let score = 25;
     const reasons = ["date"];
@@ -1115,10 +1160,10 @@ export default function ORPlannerApp() {
       reasons.push("fast tracked");
     }
 
-    if (hasBothTimes && timeDiff !== null && timeDiff <= 15) {
+    if (timeIsTight) {
       score += 25;
       reasons.push(timeDiff === 0 ? "exact time" : `time within ${timeDiff} min`);
-    } else if (hasBothTimes && timeDiff !== null && timeDiff <= 30) {
+    } else if (timeIsReasonable) {
       score += 12;
       reasons.push(`time within ${timeDiff} min`);
     } else if (!hasBothTimes) {
@@ -1135,12 +1180,18 @@ export default function ORPlannerApp() {
     score += procedureScore * 15;
 
     let status = "No Match";
+
+    // For Salesforce Account Procedure History snippets, time is often not visible.
+    // Date + facility + surgeon alone is not enough because one surgeon can have
+    // several procedures on the same day. Require procedure similarity for any
+    // possible/exact match. If procedure does not match, treat it as no match so
+    // the AI's suggested import/reconciliation action can be selected automatically.
     if (mode === "reconcile") {
-      if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && score >= 80) status = "Match";
-      else if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+      if (plannerCase.fastTracking && identityMatches && score >= 80) status = "Match";
+      else if (plannerCase.fastTracking && identityMatches && score >= 65) status = "Possible Match";
     } else {
-      if (facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && hasBothTimes && timeDiff !== null && timeDiff <= 15 && score >= 80) status = "Match";
-      else if (facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+      if (identityMatches && (timeIsTight || !hasBothTimes) && score >= 80) status = "Match";
+      else if (identityMatches && score >= 65) status = "Possible Match";
     }
 
     return { plannerCase, score: Math.round(score), status, reasons };
@@ -2366,7 +2417,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2m · account snippet facility picker</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2o · snippet surgeon add</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2533,6 +2584,28 @@ export default function ORPlannerApp() {
                                   ))}
                                 </select>
                               </label>
+                            )}
+
+                            {item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon) && (
+                              <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-100 md:col-span-2">
+                                <div className="font-bold">Surgeon not in this facility roster</div>
+                                <div className="mt-1">
+                                  {item.surgeon} is not currently saved under {item.facility}. Add them before applying if this affiliation is correct.
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => sfAddSurgeonToRosterFromRow(item)}
+                                  className="mt-2 rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700"
+                                >
+                                  Add {item.surgeon} to {item.facility} roster
+                                </button>
+                              </div>
+                            )}
+
+                            {item.surgeon && !item.facility && (
+                              <div className="rounded-2xl bg-yellow-50 p-3 text-xs font-semibold text-yellow-900 ring-1 ring-yellow-100 md:col-span-2">
+                                Select a facility first, then you can add {item.surgeon} to that facility's surgeon roster.
+                              </div>
                             )}
 
                             <label className="block">
