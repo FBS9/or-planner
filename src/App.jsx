@@ -672,10 +672,12 @@ export default function ORPlannerApp() {
       autoCloudSyncInFlightRef.current = true;
       try {
         const snapshot = getPlannerSnapshot();
-        const snapshotString = snapshotToString(snapshot);
+        const snapshotString = snapshotToCloudComparableString(snapshot);
 
-        // If this device has local changes, push them first so a frequent pull
-        // does not overwrite edits/imports that have not reached Supabase yet.
+        // Compare against the same cloud-safe snapshot format used after saves/pulls.
+        // The previous version compared the full local UI snapshot against the cloud
+        // snapshot, so harmless UI differences made the app think it was dirty forever
+        // and caused an Auto-saving loop instead of pulling cloud updates.
         if (snapshotString !== lastSavedSnapshotRef.current) {
           setCloudSyncActivity("Auto-saving...");
           await performCloudSave({ silent: true });
@@ -712,7 +714,7 @@ export default function ORPlannerApp() {
       window.removeEventListener("pointerdown", kickMobileCloudSync);
       document.removeEventListener("visibilitychange", kickMobileCloudSync);
     };
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -3210,7 +3212,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3m · mobile cloud sync every 2s</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3n · fixed cloud sync compare</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
