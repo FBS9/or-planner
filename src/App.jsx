@@ -293,6 +293,7 @@ export default function ORPlannerApp() {
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
   const lastSavedSnapshotRef = useRef("");
   const isApplyingCloudRef = useRef(false);
+  const lastAutoCloudPullAtRef = useRef(0);
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
@@ -641,7 +642,35 @@ export default function ORPlannerApp() {
       return;
     }
     setAutoCloudReady(false);
+    lastAutoCloudPullAtRef.current = Date.now();
     performCloudPull({ silent: true });
+  }, [plannerLoaded, cloudSession?.user?.id]);
+
+  useEffect(() => {
+    if (!plannerLoaded || !cloudSession?.user?.id) return;
+
+    const pullLatestCloudData = () => {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastAutoCloudPullAtRef.current < 15000) return;
+      lastAutoCloudPullAtRef.current = now;
+      setAutoCloudReady(false);
+      performCloudPull({ silent: true });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") pullLatestCloudData();
+    };
+
+    window.addEventListener("focus", pullLatestCloudData);
+    window.addEventListener("pageshow", pullLatestCloudData);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", pullLatestCloudData);
+      window.removeEventListener("pageshow", pullLatestCloudData);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [plannerLoaded, cloudSession?.user?.id]);
 
   useEffect(() => {
@@ -3156,7 +3185,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3j · fit screenshot zoom to screen</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3k · auto cloud pull on open</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
