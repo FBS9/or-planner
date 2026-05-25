@@ -1610,7 +1610,7 @@ export default function ORPlannerApp() {
               ...existingCase,
               fastTracking: item.action === "markReconciledOnly" ? Boolean(existingCase.fastTracking) : true,
               reconciled: item.action === "markReconciled" || item.action === "markReconciledOnly" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
-              notes: existingCase.notes || item.notes ? [existingCase.notes, item.notes ? `SF Import: ${item.notes}` : ""].filter(Boolean).join("\n") : existingCase.notes,
+              notes: existingCase.notes,
               salesforceImportedAt: now,
               salesforceStatus: item.salesforceStatus,
               salesforceScheduledDate: item.scheduledDate,
@@ -1632,7 +1632,7 @@ export default function ORPlannerApp() {
             fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
             reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
             growth: isAutoGrowthSurgeon(canonicalSurgeon || item.surgeon || ""),
-            notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
+            notes: "",
             salesforceImportedAt: now,
             salesforceStatus: item.salesforceStatus,
             salesforceScheduledDate: item.scheduledDate,
@@ -2451,7 +2451,6 @@ export default function ORPlannerApp() {
                           <div><span className="font-semibold">Facility:</span> {c.facility || "—"}</div>
                           <div><span className="font-semibold">Surgeon:</span> {c.surgeon || "—"}</div>
                           <div><span className="font-semibold">Procedure:</span> {c.procedure || "—"}</div>
-                          {c.notes && <div><span className="font-semibold">Notes:</span> {c.notes}</div>}
                         </div>
                       </button>
 
@@ -2582,7 +2581,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2t · roster mobile wrapping</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2u · hide system notes</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -2725,16 +2724,6 @@ export default function ORPlannerApp() {
                             {(item.scheduledDate || item.salesforceStatus) && (
                               <div className="md:col-span-2">
                                 <span className="font-bold">Salesforce:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}
-                              </div>
-                            )}
-                            {item.recommendedAction && (
-                              <div className="md:col-span-2">
-                                <span className="font-bold">AI Action:</span> {item.recommendedAction}
-                              </div>
-                            )}
-                            {item.notes && (
-                              <div className="md:col-span-2 text-slate-500">
-                                <span className="font-bold">Notes:</span> {item.notes}
                               </div>
                             )}
                           </div>
