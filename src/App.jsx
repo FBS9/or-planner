@@ -238,6 +238,7 @@ export default function ORPlannerApp() {
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showSalesforceImport, setShowSalesforceImport] = useState(false);
   const [showSfMobileReference, setShowSfMobileReference] = useState(false);
+  const [showSfDesktopReference, setShowSfDesktopReference] = useState(false);
   const [sfFile, setSfFile] = useState(null);
   const [sfPreviewUrl, setSfPreviewUrl] = useState("");
   const [sfLoading, setSfLoading] = useState(false);
@@ -2317,9 +2318,9 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2k · compact sticky reference</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2l · desktop image zoom</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. On mobile, use the floating image button while scrolling.
+                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
               </div>
 
@@ -2359,13 +2360,25 @@ export default function ORPlannerApp() {
 
                     {sfPreviewUrl && (
                       <div className="mt-4 rounded-2xl border border-blue-100 bg-white p-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSfDesktopReference(true)}
+                          className="hidden w-full cursor-zoom-in rounded-xl bg-white p-0 text-left lg:block"
+                          title="Click to enlarge screenshot"
+                        >
+                          <img
+                            src={sfPreviewUrl}
+                            alt="Salesforce screenshot preview"
+                            className="max-h-44 w-full rounded-xl object-contain lg:max-h-[34vh]"
+                          />
+                        </button>
                         <img
                           src={sfPreviewUrl}
                           alt="Salesforce screenshot preview"
-                          className="max-h-44 w-full rounded-xl object-contain lg:max-h-[34vh]"
+                          className="max-h-44 w-full rounded-xl object-contain lg:hidden"
                         />
                         <div className="mt-2 text-center text-[11px] font-semibold text-slate-400">
-                          Reference image stays pinned on desktop; mobile gets a floating viewer
+                          Desktop: click image to enlarge · Mobile: use floating viewer
                         </div>
                       </div>
                     )}
@@ -2540,6 +2553,32 @@ export default function ORPlannerApp() {
                   src={sfPreviewUrl}
                   alt="Salesforce screenshot full reference"
                   className="min-h-full w-full rounded-2xl object-contain"
+                />
+              </div>
+            </div>
+          )}
+
+          {sfPreviewUrl && showSfDesktopReference && (
+            <div className="fixed inset-0 z-[70] hidden flex-col bg-slate-950/90 p-6 lg:flex">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase tracking-wide text-blue-200">Salesforce Screenshot</div>
+                  <div className="truncate text-sm font-semibold text-white">{sfFile?.name || "Uploaded image"}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSfDesktopReference(false)}
+                  className="rounded-2xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900 shadow-sm"
+                >
+                  Done
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-3xl bg-white p-3">
+                <img
+                  src={sfPreviewUrl}
+                  alt="Salesforce screenshot enlarged desktop reference"
+                  className="mx-auto min-h-full max-w-none rounded-2xl object-contain"
                 />
               </div>
             </div>
