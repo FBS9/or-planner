@@ -1258,6 +1258,7 @@ export default function ORPlannerApp() {
     const leftFirst = leftTokens[0] || "";
     const rightFirst = rightTokens[0] || "";
     const sameLast = leftLast && rightLast && leftLast === rightLast;
+    const rosterUsesLastNameOnly = leftTokens.length === 1 || rightTokens.length === 1;
     const firstCompatible =
       !leftFirst ||
       !rightFirst ||
@@ -1266,6 +1267,7 @@ export default function ORPlannerApp() {
 
     let nameStructureScore = 0;
     if (sameLast && firstCompatible) nameStructureScore = 0.97;
+    else if (sameLast && rosterUsesLastNameOnly) nameStructureScore = 0.94;
     else if (sameLast) nameStructureScore = 0.88;
 
     return Math.max(similarity, nameStructureScore);
@@ -3104,7 +3106,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3g · true top-right roster collapse</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3h · last-name surgeon roster matching</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
