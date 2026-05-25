@@ -1118,28 +1118,59 @@ export default function ORPlannerApp() {
   const sfSuggestedAction = (item, screenshotType = "") => {
     const recommended = normalizeSfKey(item.recommendedAction);
     const type = normalizeSfKey(screenshotType);
+    const hasScheduledDate = Boolean(normalizeSfText(item.scheduledDate));
 
-    if (recommended.includes("mark_existing") || (item.scheduledDate && sfIsCompleted(item))) return "markReconciled";
-    if (recommended.includes("already_fast_tracked") || (item.scheduledDate && !sfIsCompleted(item))) return "ignore";
-    if (recommended.includes("reconciled") || sfIsCompleted(item)) return "importNewReconciled";
-    if (recommended.includes("import_new") || type.includes("scheduled_procedures")) return "importNew";
+    // Scheduled Procedures screen is different from Account Procedure History.
+    // These are newly scheduled rows and should become fastTracking cases.
+    if (type.includes("scheduled_procedures")) return "importNew";
 
-    if (sfIsOnSite(item)) return "importNew";
+    // Account Procedure History rule:
+    // Scheduled column controls fastTracking. Status controls reconciled.
+    if (hasScheduledDate && sfIsCompleted(item)) return "markReconciled";
+    if (hasScheduledDate) return "ignore";
+
+    // No Scheduled date means this case was NOT fast tracked.
+    // Completed means reconciled true, but fastTracking must stay false.
+    if (sfIsCompleted(item)) return "importNewNormalReconciled";
+    if (sfIsOnSite(item)) return "importNewNormal";
+
+    // Fallback to AI recommendation only when status/scheduled fields do not make it obvious.
+    if (recommended.includes("mark_existing")) return "markReconciled";
+    if (recommended.includes("already_fast_tracked")) return "ignore";
+    if (recommended.includes("not_fast_tracked") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("not_fast_tracked")) return "importNewNormal";
+    if (recommended.includes("import_new") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("import_new")) return "importNewNormal";
+
     return "review";
+  };
+
+  const sfHasRequiredNewCaseFields = (item, screenshotType = "") => {
+    const type = normalizeSfKey(screenshotType);
+    const requiresTime = type.includes("scheduled_procedures");
+
+    if (!item.dateKey || !item.facility || !item.surgeon || !item.procedure) return false;
+    if (requiresTime && !item.time) return false;
+
+    return true;
   };
 
   const sfActionLabel = (action) => {
     if (action === "importNew") return "Import New Fast Tracked";
     if (action === "importNewReconciled") return "Import New FT + Reconciled";
+    if (action === "importNewNormal") return "Import New Non-FT Case";
+    if (action === "importNewNormalReconciled") return "Import New Non-FT + Reconciled";
     if (action === "markFastTracking") return "Mark Existing Fast Tracked";
-    if (action === "markReconciled") return "Mark Existing Case Reconciled";
+    if (action === "markReconciled") return "Mark Existing FT Case Reconciled";
+    if (action === "markReconciledOnly") return "Mark Existing Case Reconciled";
     if (action === "ignore") return "Ignore / No Duplicate";
     return "Needs Review";
   };
 
   const sfActionBadgeClass = (action) => {
-    if (action === "markReconciled" || action === "importNewReconciled") return "bg-green-100 text-green-700";
+    if (action === "markReconciled" || action === "markReconciledOnly" || action === "importNewReconciled" || action === "importNewNormalReconciled") return "bg-green-100 text-green-700";
     if (action === "importNew" || action === "markFastTracking") return "bg-blue-100 text-blue-700";
+    if (action === "importNewNormal") return "bg-slate-100 text-slate-700";
     if (action === "ignore") return "bg-slate-100 text-slate-600";
     return "bg-yellow-100 text-yellow-800";
   };
@@ -1162,32 +1193,57 @@ export default function ORPlannerApp() {
         notes: normalizeSfText(item.notes),
       };
 
-      const initialAction = sfSuggestedAction(baseRow, screenshotType);
-      const matchMode = initialAction === "markReconciled" ? "reconcile" : "normal";
+      const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
+      const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
       const matches = sfGetPlannerMatches(baseRow, matchMode);
       const bestMatch = matches[0];
 
-      let action = initialAction;
+      let action = suggestedAction;
       let selectedPlannerCaseId = "";
 
-      if ((initialAction === "markReconciled" || initialAction === "markFastTracking") && bestMatch?.status === "Match") {
-        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      // If the AI/rules know the row should be ignored, preselect Ignore.
+      if (suggestedAction === "ignore") {
+        action = "ignore";
       }
 
-      if (initialAction === "importNew" || initialAction === "importNewReconciled") {
+      // If this row needs to reconcile an existing fast tracked case, only preselect
+      // the reconcile action when we have a confident match. Otherwise keep it in review.
+      if (suggestedAction === "markReconciled") {
         if (bestMatch?.status === "Match") {
-          action = initialAction === "importNewReconciled" ? "markReconciled" : "markFastTracking";
+          action = "markReconciled";
           selectedPlannerCaseId = bestMatch.plannerCase.id;
+        } else {
+          action = "review";
+          selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
         }
       }
 
-      if (initialAction === "markReconciled" && !selectedPlannerCaseId && bestMatch?.status === "Possible Match") {
-        action = "review";
-        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      // If this is a new case import and all key fields are present, preselect import.
+      // If a confident duplicate already exists, preselect updating the existing case instead.
+      // If there is only a possible duplicate, leave it in Needs Review.
+      if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
+        if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+          action = "review";
+        } else if (bestMatch?.status === "Match") {
+          if (suggestedAction === "importNew" || suggestedAction === "importNewReconciled") {
+            action = suggestedAction === "importNewReconciled" ? "markReconciled" : "markFastTracking";
+          } else if (suggestedAction === "importNewNormalReconciled") {
+            action = "markReconciledOnly";
+          } else {
+            action = "ignore";
+          }
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else if (bestMatch?.status === "Possible Match") {
+          action = "review";
+          selectedPlannerCaseId = bestMatch.plannerCase.id;
+        } else {
+          action = suggestedAction;
+        }
       }
 
       return {
         ...baseRow,
+        suggestedAction,
         action,
         selectedPlannerCaseId,
         matchStatus: bestMatch?.status || "No Match",
@@ -1208,6 +1264,14 @@ export default function ORPlannerApp() {
     if (sfCase.action === "markReconciled") {
       const filtered = matches.filter((match) =>
         match.plannerCase.fastTracking &&
+        match.plannerCase.displayDateKey === sfCase.dateKey &&
+        sfSimilarityScore(sfCase.facility, match.plannerCase.facility) >= 0.7
+      );
+      return filtered.length ? filtered : matches.slice(0, 10);
+    }
+
+    if (sfCase.action === "markReconciledOnly") {
+      const filtered = matches.filter((match) =>
         match.plannerCase.displayDateKey === sfCase.dateKey &&
         sfSimilarityScore(sfCase.facility, match.plannerCase.facility) >= 0.7
       );
@@ -1247,7 +1311,7 @@ export default function ORPlannerApp() {
 
         const existingCases = next[dateKey] || [];
 
-        if (item.action === "markReconciled" || item.action === "markFastTracking") {
+        if (item.action === "markReconciled" || item.action === "markReconciledOnly" || item.action === "markFastTracking") {
           const matchedId = item.selectedPlannerCaseId;
           if (!matchedId) {
             skippedCount += 1;
@@ -1258,12 +1322,12 @@ export default function ORPlannerApp() {
           next[dateKey] = existingCases.map((existingCase) => {
             if (existingCase.id !== matchedId) return existingCase;
             didUpdate = true;
-            if (item.action === "markReconciled") reconciledCount += 1;
+            if (item.action === "markReconciled" || item.action === "markReconciledOnly") reconciledCount += 1;
             if (item.action === "markFastTracking") fastTrackedCount += 1;
             return {
               ...existingCase,
-              fastTracking: true,
-              reconciled: item.action === "markReconciled" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
+              fastTracking: item.action === "markReconciledOnly" ? Boolean(existingCase.fastTracking) : true,
+              reconciled: item.action === "markReconciled" || item.action === "markReconciledOnly" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
               notes: existingCase.notes || item.notes ? [existingCase.notes, item.notes ? `SF Import: ${item.notes}` : ""].filter(Boolean).join("\n") : existingCase.notes,
               salesforceImportedAt: now,
               salesforceStatus: item.salesforceStatus,
@@ -1275,15 +1339,15 @@ export default function ORPlannerApp() {
           return;
         }
 
-        if (item.action === "importNew" || item.action === "importNewReconciled") {
+        if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(item.action)) {
           const facility = item.facility || sfAccountName || "";
           const newCase = {
             ...blankCase(dateKey, facility),
             time: item.time || "",
             surgeon: item.surgeon || "",
             procedure: item.procedure || "",
-            fastTracking: true,
-            reconciled: item.action === "importNewReconciled" || sfIsCompleted(item),
+            fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
+            reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
             growth: isAutoGrowthSurgeon(item.surgeon || ""),
             notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
             salesforceImportedAt: now,
@@ -2259,7 +2323,10 @@ export default function ORPlannerApp() {
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="font-bold text-slate-900">Row {index + 1}</div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.action)}`}>{sfActionLabel(item.action)}</div>
+                              {item.suggestedAction && item.suggestedAction !== item.action && (
+                                <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.suggestedAction)}`}>Suggested: {sfActionLabel(item.suggestedAction)}</div>
+                              )}
+                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.action)}`}>Selected: {sfActionLabel(item.action)}</div>
                               <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
                             </div>
                           </div>
@@ -2292,19 +2359,22 @@ export default function ORPlannerApp() {
                               <span className="mb-1 block text-xs font-bold text-slate-500">Review Action</span>
                               <select
                                 value={item.action}
-                                onChange={(event) => updateSalesforceRow(item.id, { action: event.target.value, selectedPlannerCaseId: event.target.value === "importNew" || event.target.value === "importNewReconciled" || event.target.value === "ignore" || event.target.value === "review" ? "" : item.selectedPlannerCaseId })}
+                                onChange={(event) => updateSalesforceRow(item.id, { action: event.target.value, selectedPlannerCaseId: ["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled", "ignore", "review"].includes(event.target.value) ? "" : item.selectedPlannerCaseId })}
                                 className="input bg-white"
                               >
                                 <option value="review">Needs Review</option>
                                 <option value="importNew">Import New Fast Tracked</option>
                                 <option value="importNewReconciled">Import New FT + Reconciled</option>
+                                <option value="importNewNormal">Import New Non-FT Case</option>
+                                <option value="importNewNormalReconciled">Import New Non-FT + Reconciled</option>
                                 <option value="markFastTracking">Mark Existing Fast Tracked</option>
-                                <option value="markReconciled">Mark Existing Case Reconciled</option>
+                                <option value="markReconciled">Mark Existing FT Case Reconciled</option>
+                                <option value="markReconciledOnly">Mark Existing Case Reconciled</option>
                                 <option value="ignore">Ignore / No Duplicate</option>
                               </select>
                             </label>
 
-                            {(item.action === "markReconciled" || item.action === "markFastTracking") && (
+                            {(item.action === "markReconciled" || item.action === "markReconciledOnly" || item.action === "markFastTracking") && (
                               <label className="block">
                                 <span className="mb-1 block text-xs font-bold text-slate-500">Matching OR Planner Case</span>
                                 <select
