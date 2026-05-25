@@ -244,6 +244,7 @@ export default function ORPlannerApp() {
   const [sfScreenshotType, setSfScreenshotType] = useState("");
   const [sfAccountName, setSfAccountName] = useState("");
   const [sfExtractedCases, setSfExtractedCases] = useState([]);
+  const [sfApplySummary, setSfApplySummary] = useState("");
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
@@ -998,6 +999,324 @@ export default function ORPlannerApp() {
     return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   };
 
+
+  const normalizeSfKey = (value = "") =>
+    normalizeSfText(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9\s/-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const sfTokens = (value = "") =>
+    normalizeSfKey(value)
+      .split(" ")
+      .filter((token) => token.length > 1);
+
+  const sfLastName = (value = "") => {
+    const tokens = sfTokens(value);
+    return tokens[tokens.length - 1] || "";
+  };
+
+  const sfSimilarityScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeSfKey(leftValue);
+    const right = normalizeSfKey(rightValue);
+
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.85;
+
+    const leftTokens = new Set(sfTokens(left));
+    const rightTokens = new Set(sfTokens(right));
+    if (!leftTokens.size || !rightTokens.size) return 0;
+
+    const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    const union = new Set([...leftTokens, ...rightTokens]).size;
+    return intersection / union;
+  };
+
+  const sfSurgeonScore = (left = "", right = "") => {
+    const similarity = sfSimilarityScore(left, right);
+    const leftLast = sfLastName(left);
+    const rightLast = sfLastName(right);
+    const lastNameMatch = leftLast && rightLast && leftLast === rightLast ? 0.9 : 0;
+    return Math.max(similarity, lastNameMatch);
+  };
+
+  const sfTimeDifferenceMinutes = (left = "", right = "") => {
+    const leftMinutes = parseTimeToMinutes(left);
+    const rightMinutes = parseTimeToMinutes(right);
+    if (leftMinutes === null || rightMinutes === null) return null;
+    return Math.abs(leftMinutes - rightMinutes);
+  };
+
+  const sfIsCompleted = (item) => normalizeSfKey(item.salesforceStatus) === "completed";
+  const sfIsOnSite = (item) => normalizeSfKey(item.salesforceStatus) === "onsite";
+
+  const sfFlattenPlannerCases = () =>
+    Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
+      (dateCases || []).map((item) => ({ ...item, displayDateKey: dateKey }))
+    );
+
+  const sfScorePlannerMatch = (sfCase, plannerCase, mode = "normal") => {
+    const dateMatches = sfCase.dateKey && sfCase.dateKey === plannerCase.displayDateKey;
+    if (!dateMatches) {
+      return { plannerCase, score: 0, status: "No Match", reasons: ["date mismatch"] };
+    }
+
+    const facilityScore = sfSimilarityScore(sfCase.facility, plannerCase.facility);
+    const surgeonScore = sfSurgeonScore(sfCase.surgeon, plannerCase.surgeon);
+    const procedureScore = sfSimilarityScore(sfCase.procedure, plannerCase.procedure);
+    const timeDiff = sfTimeDifferenceMinutes(sfCase.time, plannerCase.time);
+    const hasBothTimes = parseTimeToMinutes(sfCase.time) !== null && parseTimeToMinutes(plannerCase.time) !== null;
+
+    let score = 25;
+    const reasons = ["date"];
+
+    if (mode === "reconcile") {
+      if (!plannerCase.fastTracking) return { plannerCase, score: 0, status: "No Match", reasons: ["not fast tracked"] };
+      score += 20;
+      reasons.push("fast tracked");
+    }
+
+    if (hasBothTimes && timeDiff !== null && timeDiff <= 15) {
+      score += 25;
+      reasons.push(timeDiff === 0 ? "exact time" : `time within ${timeDiff} min`);
+    } else if (hasBothTimes && timeDiff !== null && timeDiff <= 30) {
+      score += 12;
+      reasons.push(`time within ${timeDiff} min`);
+    } else if (!hasBothTimes) {
+      score += mode === "reconcile" ? 0 : 5;
+      reasons.push("time missing");
+    }
+
+    if (facilityScore >= 0.7) reasons.push("facility");
+    if (surgeonScore >= 0.7) reasons.push("surgeon");
+    if (procedureScore >= 0.5) reasons.push("procedure");
+
+    score += facilityScore * 20;
+    score += surgeonScore * 20;
+    score += procedureScore * 15;
+
+    let status = "No Match";
+    if (mode === "reconcile") {
+      if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && score >= 80) status = "Match";
+      else if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+    } else {
+      if (facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && hasBothTimes && timeDiff !== null && timeDiff <= 15 && score >= 80) status = "Match";
+      else if (facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+    }
+
+    return { plannerCase, score: Math.round(score), status, reasons };
+  };
+
+  const sfGetPlannerMatches = (sfCase, mode = "normal") =>
+    sfFlattenPlannerCases()
+      .map((plannerCase) => sfScorePlannerMatch(sfCase, plannerCase, mode))
+      .filter((match) => match.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+  const sfSuggestedAction = (item, screenshotType = "") => {
+    const recommended = normalizeSfKey(item.recommendedAction);
+    const type = normalizeSfKey(screenshotType);
+
+    if (recommended.includes("mark_existing") || (item.scheduledDate && sfIsCompleted(item))) return "markReconciled";
+    if (recommended.includes("already_fast_tracked") || (item.scheduledDate && !sfIsCompleted(item))) return "ignore";
+    if (recommended.includes("reconciled") || sfIsCompleted(item)) return "importNewReconciled";
+    if (recommended.includes("import_new") || type.includes("scheduled_procedures")) return "importNew";
+
+    if (sfIsOnSite(item)) return "importNew";
+    return "review";
+  };
+
+  const sfActionLabel = (action) => {
+    if (action === "importNew") return "Import New Fast Tracked";
+    if (action === "importNewReconciled") return "Import New FT + Reconciled";
+    if (action === "markFastTracking") return "Mark Existing Fast Tracked";
+    if (action === "markReconciled") return "Mark Existing Case Reconciled";
+    if (action === "ignore") return "Ignore / No Duplicate";
+    return "Needs Review";
+  };
+
+  const sfActionBadgeClass = (action) => {
+    if (action === "markReconciled" || action === "importNewReconciled") return "bg-green-100 text-green-700";
+    if (action === "importNew" || action === "markFastTracking") return "bg-blue-100 text-blue-700";
+    if (action === "ignore") return "bg-slate-100 text-slate-600";
+    return "bg-yellow-100 text-yellow-800";
+  };
+
+  const sfPrepareRows = (rows, screenshotType) =>
+    rows.map((item, index) => {
+      const baseRow = {
+        id: `sf-row-${Date.now()}-${index}`,
+        date: normalizeSfText(item.date),
+        dateKey: sfDateToDateKey(item.date),
+        time: normalizeSfText(item.time),
+        facility: normalizeSfText(item.hospital),
+        category: normalizeSfText(item.category),
+        procedure: normalizeSfText(item.procedure),
+        surgeon: normalizeSfText(item.surgeon),
+        scheduledDate: normalizeSfText(item.scheduledDate),
+        salesforceStatus: normalizeSfText(item.salesforceStatus),
+        recommendedAction: normalizeSfText(item.recommendedAction),
+        confidence: normalizeSfText(item.confidence || "Medium"),
+        notes: normalizeSfText(item.notes),
+      };
+
+      const initialAction = sfSuggestedAction(baseRow, screenshotType);
+      const matchMode = initialAction === "markReconciled" ? "reconcile" : "normal";
+      const matches = sfGetPlannerMatches(baseRow, matchMode);
+      const bestMatch = matches[0];
+
+      let action = initialAction;
+      let selectedPlannerCaseId = "";
+
+      if ((initialAction === "markReconciled" || initialAction === "markFastTracking") && bestMatch?.status === "Match") {
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      }
+
+      if (initialAction === "importNew" || initialAction === "importNewReconciled") {
+        if (bestMatch?.status === "Match") {
+          action = initialAction === "importNewReconciled" ? "markReconciled" : "markFastTracking";
+          selectedPlannerCaseId = bestMatch.plannerCase.id;
+        }
+      }
+
+      if (initialAction === "markReconciled" && !selectedPlannerCaseId && bestMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      }
+
+      return {
+        ...baseRow,
+        action,
+        selectedPlannerCaseId,
+        matchStatus: bestMatch?.status || "No Match",
+        matchScore: bestMatch?.score || 0,
+        matchReasons: bestMatch?.reasons || [],
+      };
+    });
+
+  const updateSalesforceRow = (id, patch) => {
+    setSfExtractedCases((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    setSfApplySummary("");
+  };
+
+  const getSfPlannerCaseOptions = (sfCase) => {
+    const mode = sfCase.action === "markReconciled" ? "reconcile" : "normal";
+    const matches = sfGetPlannerMatches(sfCase, mode);
+
+    if (sfCase.action === "markReconciled") {
+      const filtered = matches.filter((match) =>
+        match.plannerCase.fastTracking &&
+        match.plannerCase.displayDateKey === sfCase.dateKey &&
+        sfSimilarityScore(sfCase.facility, match.plannerCase.facility) >= 0.7
+      );
+      return filtered.length ? filtered : matches.slice(0, 10);
+    }
+
+    return matches.slice(0, 10);
+  };
+
+  const applySalesforceRowsToPlanner = () => {
+    const now = new Date().toISOString();
+    const rowsToApply = sfExtractedCases.filter((item) => item.action !== "review");
+    const reviewCount = sfExtractedCases.length - rowsToApply.length;
+    let importedCount = 0;
+    let reconciledCount = 0;
+    let fastTrackedCount = 0;
+    let ignoredCount = 0;
+    let skippedCount = reviewCount;
+    const newFacilities = new Set();
+    const firstAppliedDate = rowsToApply.find((item) => item.dateKey)?.dateKey;
+
+    setCasesByDate((prev) => {
+      const next = { ...prev };
+
+      rowsToApply.forEach((item) => {
+        const dateKey = item.dateKey;
+
+        if (item.action === "ignore") {
+          ignoredCount += 1;
+          return;
+        }
+
+        if (!dateKey) {
+          skippedCount += 1;
+          return;
+        }
+
+        const existingCases = next[dateKey] || [];
+
+        if (item.action === "markReconciled" || item.action === "markFastTracking") {
+          const matchedId = item.selectedPlannerCaseId;
+          if (!matchedId) {
+            skippedCount += 1;
+            return;
+          }
+
+          let didUpdate = false;
+          next[dateKey] = existingCases.map((existingCase) => {
+            if (existingCase.id !== matchedId) return existingCase;
+            didUpdate = true;
+            if (item.action === "markReconciled") reconciledCount += 1;
+            if (item.action === "markFastTracking") fastTrackedCount += 1;
+            return {
+              ...existingCase,
+              fastTracking: true,
+              reconciled: item.action === "markReconciled" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
+              notes: existingCase.notes || item.notes ? [existingCase.notes, item.notes ? `SF Import: ${item.notes}` : ""].filter(Boolean).join("\n") : existingCase.notes,
+              salesforceImportedAt: now,
+              salesforceStatus: item.salesforceStatus,
+              salesforceScheduledDate: item.scheduledDate,
+            };
+          });
+
+          if (!didUpdate) skippedCount += 1;
+          return;
+        }
+
+        if (item.action === "importNew" || item.action === "importNewReconciled") {
+          const facility = item.facility || sfAccountName || "";
+          const newCase = {
+            ...blankCase(dateKey, facility),
+            time: item.time || "",
+            surgeon: item.surgeon || "",
+            procedure: item.procedure || "",
+            fastTracking: true,
+            reconciled: item.action === "importNewReconciled" || sfIsCompleted(item),
+            growth: isAutoGrowthSurgeon(item.surgeon || ""),
+            notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
+            salesforceImportedAt: now,
+            salesforceStatus: item.salesforceStatus,
+            salesforceScheduledDate: item.scheduledDate,
+          };
+
+          next[dateKey] = [...existingCases, newCase].sort(compareCasesByTime);
+          if (facility) newFacilities.add(facility);
+          importedCount += 1;
+        }
+      });
+
+      return next;
+    });
+
+    if (newFacilities.size) {
+      setFacilities((prev) => Array.from(new Set([...prev, ...newFacilities])).sort((a, b) => a.localeCompare(b)));
+      setSurgeonRosters((prev) => {
+        const next = { ...prev };
+        newFacilities.forEach((facility) => {
+          if (!next[facility]) next[facility] = [];
+        });
+        return next;
+      });
+    }
+
+    if (firstAppliedDate) setSelectedDate(firstAppliedDate);
+
+    setSfExtractedCases((prev) => prev.filter((item) => item.action === "review"));
+    setSfApplySummary(`Applied ${importedCount + reconciledCount + fastTrackedCount + ignoredCount} row(s): ${importedCount} imported, ${reconciledCount} reconciled, ${fastTrackedCount} marked fast tracked, ${ignoredCount} ignored. ${skippedCount ? `${skippedCount} row(s) still need review or were skipped.` : ""}`.trim());
+  };
+
   const resetSalesforceImport = () => {
     setSfFile(null);
     setSfPreviewUrl("");
@@ -1006,6 +1325,7 @@ export default function ORPlannerApp() {
     setSfScreenshotType("");
     setSfAccountName("");
     setSfExtractedCases([]);
+    setSfApplySummary("");
   };
 
   const handleSalesforceFileChange = (event) => {
@@ -1018,6 +1338,7 @@ export default function ORPlannerApp() {
     setSfScreenshotType("");
     setSfAccountName("");
     setSfExtractedCases([]);
+    setSfApplySummary("");
   };
 
   const extractSalesforceCases = async () => {
@@ -1061,23 +1382,8 @@ export default function ORPlannerApp() {
 
       setSfScreenshotType(data.screenshotType || "unknown");
       setSfAccountName(data.accountName || "");
-      setSfExtractedCases(
-        rows.map((item, index) => ({
-          id: `sf-row-${Date.now()}-${index}`,
-          date: normalizeSfText(item.date),
-          dateKey: sfDateToDateKey(item.date),
-          time: normalizeSfText(item.time),
-          facility: normalizeSfText(item.hospital),
-          category: normalizeSfText(item.category),
-          procedure: normalizeSfText(item.procedure),
-          surgeon: normalizeSfText(item.surgeon),
-          scheduledDate: normalizeSfText(item.scheduledDate),
-          salesforceStatus: normalizeSfText(item.salesforceStatus),
-          recommendedAction: normalizeSfText(item.recommendedAction),
-          confidence: normalizeSfText(item.confidence || "Medium"),
-          notes: normalizeSfText(item.notes),
-        }))
-      );
+      setSfExtractedCases(sfPrepareRows(rows, data.screenshotType || "unknown"));
+      setSfApplySummary("");
     } catch (error) {
       setSfError(error instanceof Error ? error.message : "Something went wrong extracting Salesforce cases.");
     } finally {
@@ -1857,7 +2163,7 @@ export default function ORPlannerApp() {
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                  Upload a Salesforce screenshot and review the extracted rows. This phase only reads and displays rows — it does not change your planner yet.
+                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner.
                 </p>
               </div>
 
@@ -1931,11 +2237,17 @@ export default function ORPlannerApp() {
                   {sfExtractedCases.length > 0 && (
                     <button
                       type="button"
-                      disabled
-                      className="w-full rounded-2xl bg-slate-200 px-4 py-3 text-sm font-bold text-slate-500"
+                      onClick={applySalesforceRowsToPlanner}
+                      className="w-full rounded-2xl bg-green-700 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-green-800"
                     >
-                      Apply to OR Planner coming next
+                      Apply Reviewed Rows to OR Planner
                     </button>
+                  )}
+
+                  {sfApplySummary && (
+                    <div className="rounded-3xl bg-green-50 p-4 text-sm font-semibold text-green-800 ring-1 ring-green-100">
+                      {sfApplySummary}
+                    </div>
                   )}
                 </div>
 
@@ -1944,9 +2256,12 @@ export default function ORPlannerApp() {
                     <div className="space-y-3">
                       {sfExtractedCases.map((item, index) => (
                         <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="font-bold text-slate-900">Row {index + 1}</div>
-                            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.action)}`}>{sfActionLabel(item.action)}</div>
+                              <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
+                            </div>
                           </div>
 
                           <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -1970,6 +2285,46 @@ export default function ORPlannerApp() {
                                 <span className="font-bold">Notes:</span> {item.notes}
                               </div>
                             )}
+                          </div>
+
+                          <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-1 block text-xs font-bold text-slate-500">Review Action</span>
+                              <select
+                                value={item.action}
+                                onChange={(event) => updateSalesforceRow(item.id, { action: event.target.value, selectedPlannerCaseId: event.target.value === "importNew" || event.target.value === "importNewReconciled" || event.target.value === "ignore" || event.target.value === "review" ? "" : item.selectedPlannerCaseId })}
+                                className="input bg-white"
+                              >
+                                <option value="review">Needs Review</option>
+                                <option value="importNew">Import New Fast Tracked</option>
+                                <option value="importNewReconciled">Import New FT + Reconciled</option>
+                                <option value="markFastTracking">Mark Existing Fast Tracked</option>
+                                <option value="markReconciled">Mark Existing Case Reconciled</option>
+                                <option value="ignore">Ignore / No Duplicate</option>
+                              </select>
+                            </label>
+
+                            {(item.action === "markReconciled" || item.action === "markFastTracking") && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Matching OR Planner Case</span>
+                                <select
+                                  value={item.selectedPlannerCaseId || ""}
+                                  onChange={(event) => updateSalesforceRow(item.id, { selectedPlannerCaseId: event.target.value })}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Select matching case</option>
+                                  {getSfPlannerCaseOptions(item).map((match) => (
+                                    <option key={`${item.id}-${match.plannerCase.id}`} value={match.plannerCase.id}>
+                                      {formatShortDate(match.plannerCase.displayDateKey)} · {match.plannerCase.time || "No time"} · {match.plannerCase.facility || "No Facility"} · {match.plannerCase.surgeon || "No Surgeon"} · {match.plannerCase.procedure || "No Procedure"} · FT {match.plannerCase.fastTracking ? "Yes" : "No"} · REC {match.plannerCase.reconciled ? "Yes" : "No"}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+
+                            <div className="text-xs text-slate-500 md:col-span-2">
+                              <span className="font-bold text-slate-700">Best match:</span> {item.matchStatus || "No Match"} {item.matchScore ? `(${item.matchScore})` : ""} {item.matchReasons?.length ? `· ${item.matchReasons.join(", ")}` : ""}
+                            </div>
                           </div>
                         </div>
                       ))}
