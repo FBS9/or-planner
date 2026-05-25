@@ -1109,6 +1109,151 @@ export default function ORPlannerApp() {
     };
   };
 
+  const sfProcedureTokens = (value = "") =>
+    sfTokens(value).filter((token) => !["the", "and", "with", "without", "case", "procedure"].includes(token));
+
+  const sfProcedureScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeSfKey(leftValue);
+    const right = normalizeSfKey(rightValue);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+
+    const leftTokens = sfProcedureTokens(left);
+    const rightTokens = sfProcedureTokens(right);
+    if (!leftTokens.length || !rightTokens.length) return 0;
+
+    const leftSet = new Set(leftTokens);
+    const rightSet = new Set(rightTokens);
+    const intersection = leftTokens.filter((token) => rightSet.has(token)).length;
+    const smaller = Math.min(leftSet.size, rightSet.size);
+    const larger = Math.max(leftSet.size, rightSet.size);
+    const containment = smaller ? intersection / smaller : 0;
+    const jaccard = larger ? intersection / new Set([...leftTokens, ...rightTokens]).size : 0;
+
+    // If one saved procedure is a clean shorter version of the Salesforce phrase
+    // (ex: "Ventral" vs "Ventral Hernia IPOM"), treat it as a strong match so
+    // imports use the existing procedure label instead of creating a duplicate.
+    if (left.includes(right) || right.includes(left)) {
+      if (containment >= 1 && smaller >= 1) return 0.95;
+      return Math.max(0.88, jaccard);
+    }
+
+    // Shared specific words are useful, but do not let one generic word create a match.
+    if (containment >= 1 && smaller >= 2) return 0.9;
+    if (containment >= 0.75 && intersection >= 2) return 0.82;
+
+    return jaccard;
+  };
+
+  const sfPreferredProcedureName = (left = "", right = "") => {
+    const leftName = normalizeSfText(left);
+    const rightName = normalizeSfText(right);
+    if (!leftName) return rightName;
+    if (!rightName) return leftName;
+
+    const leftKey = normalizeSfKey(leftName);
+    const rightKey = normalizeSfKey(rightName);
+    if (leftKey === rightKey) return leftName.length <= rightName.length ? leftName : rightName;
+
+    // Prefer the existing clean/shorter procedure label when one contains the other.
+    if (leftKey.includes(rightKey) || rightKey.includes(leftKey)) {
+      return leftName.length <= rightName.length ? leftName : rightName;
+    }
+
+    return leftName;
+  };
+
+  const sfExistingProcedureCandidates = (facility = "", surgeon = "", specialty = "", sourceCasesByDate = casesByDate) => {
+    const normalizedFacility = normalizeSfText(facility);
+    const normalizedSurgeon = normalizeSfText(surgeon);
+    const normalizedSpecialty = normalizeProcedureSearch(specialty || getSurgeonSpecialty(surgeonRosters, normalizedFacility, normalizedSurgeon));
+
+    const counts = new Map();
+
+    Object.entries(sourceCasesByDate || {}).forEach(([, dateCases]) => {
+      (dateCases || []).forEach((item) => {
+        const procedure = normalizeSfText(item?.procedure);
+        if (!procedure || procedure.length < 4 || procedure.toLowerCase() === "hysterectomy b") return;
+
+        const itemSpecialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon));
+        const sameSpecialty = normalizedSpecialty && itemSpecialty && normalizedSpecialty === itemSpecialty;
+        const sameFacilitySurgeon =
+          normalizedFacility &&
+          normalizedSurgeon &&
+          normalizeSfText(item.facility) === normalizedFacility &&
+          sfSurgeonScore(item.surgeon, normalizedSurgeon) >= 0.9;
+
+        // Prefer procedures from the same specialty. If specialty is missing, fall back
+        // to same facility/surgeon so incomplete Salesforce snippets still canonicalize.
+        if (!sameSpecialty && !sameFacilitySurgeon) return;
+
+        const current = counts.get(procedure) || 0;
+        counts.set(procedure, current + 1);
+      });
+    });
+
+    return Array.from(counts.entries()).map(([procedure, count]) => ({ procedure, count }));
+  };
+
+  const sfBestExistingProcedureMatch = (procedure = "", facility = "", surgeon = "", specialty = "", sourceCasesByDate = casesByDate) => {
+    const normalizedProcedure = normalizeSfText(procedure);
+    if (!normalizedProcedure) return null;
+
+    const normalizedProcedureKey = normalizeSfKey(normalizedProcedure);
+
+    const candidates = sfExistingProcedureCandidates(facility, surgeon, specialty, sourceCasesByDate)
+      .map((candidate) => {
+        const candidateKey = normalizeSfKey(candidate.procedure);
+        return {
+          ...candidate,
+          candidateKey,
+          score: sfProcedureScore(candidate.procedure, normalizedProcedure),
+          isShorterContainedLabel:
+            candidateKey &&
+            candidateKey !== normalizedProcedureKey &&
+            candidateKey.length >= 4 &&
+            normalizedProcedureKey.includes(candidateKey),
+        };
+      })
+      .filter((candidate) => candidate.score >= 0.88)
+      .sort((a, b) => {
+        // Prefer the already-saved shorter label when Salesforce gives a longer
+        // variant of it, ex: saved "Ventral" vs SF "Ventral Hernia IPOM".
+        if (a.isShorterContainedLabel !== b.isShorterContainedLabel) return a.isShorterContainedLabel ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.count !== a.count) return b.count - a.count;
+        return a.procedure.length - b.procedure.length;
+      });
+
+    return candidates[0] || null;
+  };
+
+  const sfCanonicalProcedureNameForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) return "";
+
+    const facility = normalizeSfText(row?.facility);
+    const surgeon = normalizeSfText(row?.surgeon);
+    const specialty = normalizeSfText(row?.rosterSurgeonSubspecialty || row?.category || getSurgeonSpecialty(surgeonRosters, facility, surgeon));
+    const match = sfBestExistingProcedureMatch(procedure, facility, surgeon, specialty, sourceCasesByDate);
+
+    return match?.procedure || procedure;
+  };
+
+  const sfCanonicalizeProcedureForRow = (row, sourceCasesByDate = casesByDate) => {
+    const procedure = normalizeSfText(row?.procedure);
+    if (!procedure) return row;
+
+    const canonicalProcedure = sfCanonicalProcedureNameForRow(row, sourceCasesByDate);
+    if (!canonicalProcedure || canonicalProcedure === procedure) return row;
+
+    return {
+      ...row,
+      procedure: canonicalProcedure,
+      procedureCanonicalizedFrom: procedure,
+    };
+  };
+
   const sfTimeDifferenceMinutes = (left = "", right = "") => {
     const leftMinutes = parseTimeToMinutes(left);
     const rightMinutes = parseTimeToMinutes(right);
@@ -1469,7 +1614,7 @@ export default function ORPlannerApp() {
         actionManuallyEdited: false,
       };
 
-      const baseRow = sfCanonicalizeSurgeonForRow(rawBaseRow);
+      const baseRow = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawBaseRow));
 
       return {
         ...baseRow,
@@ -1524,7 +1669,7 @@ export default function ORPlannerApp() {
           actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
         };
 
-        const patched = sfCanonicalizeSurgeonForRow(rawPatched);
+        const patched = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawPatched));
 
         if (!patched.actionManuallyEdited) {
           return {
@@ -1628,7 +1773,7 @@ export default function ORPlannerApp() {
             ...blankCase(dateKey, facility),
             time: item.time || "",
             surgeon: canonicalSurgeon || item.surgeon || "",
-            procedure: item.procedure || "",
+            procedure: sfCanonicalProcedureNameForRow(item, next) || item.procedure || "",
             fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
             reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
             growth: isAutoGrowthSurgeon(canonicalSurgeon || item.surgeon || ""),
@@ -1709,13 +1854,22 @@ export default function ORPlannerApp() {
       Object.entries(prev || {}).forEach(([dateKey, dateCases]) => {
         next[dateKey] = (dateCases || []).map((item) => {
           const canonicalSurgeon = sfCanonicalSurgeonNameForFacility(item.facility, item.surgeon);
-          if (!canonicalSurgeon || canonicalSurgeon === item.surgeon) return item;
-          changed = true;
-          return {
-            ...item,
-            surgeon: canonicalSurgeon,
-            growth: item.growth || isAutoGrowthSurgeon(canonicalSurgeon),
-          };
+          const surgeonUpdatedItem = canonicalSurgeon && canonicalSurgeon !== item.surgeon
+            ? {
+                ...item,
+                surgeon: canonicalSurgeon,
+                growth: item.growth || isAutoGrowthSurgeon(canonicalSurgeon),
+              }
+            : item;
+
+          const procedureUpdatedItem = sfCanonicalizeProcedureForRow(surgeonUpdatedItem, prev);
+
+          if (procedureUpdatedItem !== item) {
+            changed = true;
+            return procedureUpdatedItem;
+          }
+
+          return item;
         });
       });
 
@@ -2583,7 +2737,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2w · roster inline mobile actions</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2x · procedure roster matching</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
