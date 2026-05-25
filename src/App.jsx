@@ -300,6 +300,7 @@ export default function ORPlannerApp() {
   const lastLocalEditAtRef = useRef(0);
   const localDirtyRef = useRef(false);
   const lastCloudCheckAtRef = useRef(0);
+  const cloudAutoSaveTimerRef = useRef(null);
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
@@ -529,6 +530,28 @@ export default function ORPlannerApp() {
         lastLocalEditAtRef.current = Date.now();
       }
     }
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+
+  useEffect(() => {
+    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+    if (!localDirtyRef.current || isApplyingCloudRef.current) return;
+
+    if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
+    cloudAutoSaveTimerRef.current = window.setTimeout(async () => {
+      if (!localDirtyRef.current || isApplyingCloudRef.current) return;
+      const snapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+      if (snapshotString === lastSavedSnapshotRef.current) {
+        localDirtyRef.current = false;
+        setCloudSyncActivity("Synced");
+        return;
+      }
+      setCloudSyncActivity("Auto-saving...");
+      await performCloudSave({ silent: true });
+    }, 900);
+
+    return () => {
+      if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
+    };
   }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
@@ -773,7 +796,10 @@ export default function ORPlannerApp() {
             return;
           }
 
-          if (localEditIsFresh) return;
+          if (localEditIsFresh) {
+            setCloudSyncActivity("Local edit pending");
+            return;
+          }
 
           setCloudSyncActivity("Live sync...");
           applyCloudPlannerData(incoming.planner_data, incoming.updated_at, "Synced");
@@ -819,12 +845,11 @@ export default function ORPlannerApp() {
           // source of truth. If this device has a fresh local edit, save it. Otherwise,
           // pull the cloud snapshot so desktop changes appear on mobile automatically.
           if (cloudDiffersFromLocal) {
-            // Only let this device push local data when it has a truly fresh edit.
-            // If the phone is idle, stale, or just holding old local data, pull cloud instead.
-            // This makes desktop changes appear on mobile without needing Sync Now.
+            // The sync checker is pull-only. It should never push this device's
+            // stale local copy over another device. Actual local edits are saved
+            // by the separate debounced auto-save effect above.
             if (localEditIsFresh) {
-              setCloudSyncActivity("Auto-saving...");
-              await performCloudSave({ silent: true });
+              setCloudSyncActivity("Local edit pending");
               return;
             }
 
@@ -3371,7 +3396,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3t · no stale mobile push sync</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3u · pull-only sync checker</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
