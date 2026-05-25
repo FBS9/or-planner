@@ -237,6 +237,16 @@ export default function ORPlannerApp() {
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
   const [showSalesforceImport, setShowSalesforceImport] = useState(false);
+  const [showSfMobileReference, setShowSfMobileReference] = useState(false);
+  const [showSfDesktopReference, setShowSfDesktopReference] = useState(false);
+  const [sfFile, setSfFile] = useState(null);
+  const [sfPreviewUrl, setSfPreviewUrl] = useState("");
+  const [sfLoading, setSfLoading] = useState(false);
+  const [sfError, setSfError] = useState("");
+  const [sfScreenshotType, setSfScreenshotType] = useState("");
+  const [sfAccountName, setSfAccountName] = useState("");
+  const [sfExtractedCases, setSfExtractedCases] = useState([]);
+  const [sfApplySummary, setSfApplySummary] = useState("");
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
@@ -979,8 +989,566 @@ export default function ORPlannerApp() {
     URL.revokeObjectURL(url);
   };
 
+  const normalizeSfText = (value = "") =>
+    String(value || "").replace(/\s+/g, " ").trim();
+
+  const sfDateToDateKey = (value = "") => {
+    const text = normalizeSfText(value);
+    const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (!match) return text;
+    const [, month, day, year] = match;
+    const fullYear = year.length === 2 ? `20${year}` : year;
+    return `${fullYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  };
+
+
+  const normalizeSfKey = (value = "") =>
+    normalizeSfText(value)
+      .toLowerCase()
+      .replace(/[_-]+/g, " ")
+      .replace(/[^a-z0-9\s/]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const sfTokens = (value = "") =>
+    normalizeSfKey(value)
+      .split(" ")
+      .filter((token) => token.length > 1);
+
+  const sfLastName = (value = "") => {
+    const tokens = sfTokens(value);
+    return tokens[tokens.length - 1] || "";
+  };
+
+  const sfSimilarityScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeSfKey(leftValue);
+    const right = normalizeSfKey(rightValue);
+
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.85;
+
+    const leftTokens = new Set(sfTokens(left));
+    const rightTokens = new Set(sfTokens(right));
+    if (!leftTokens.size || !rightTokens.size) return 0;
+
+    const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    const union = new Set([...leftTokens, ...rightTokens]).size;
+    return intersection / union;
+  };
+
+  const sfSurgeonScore = (left = "", right = "") => {
+    const similarity = sfSimilarityScore(left, right);
+    const leftLast = sfLastName(left);
+    const rightLast = sfLastName(right);
+    const lastNameMatch = leftLast && rightLast && leftLast === rightLast ? 0.9 : 0;
+    return Math.max(similarity, lastNameMatch);
+  };
+
+  const sfTimeDifferenceMinutes = (left = "", right = "") => {
+    const leftMinutes = parseTimeToMinutes(left);
+    const rightMinutes = parseTimeToMinutes(right);
+    if (leftMinutes === null || rightMinutes === null) return null;
+    return Math.abs(leftMinutes - rightMinutes);
+  };
+
+  const sfIsCompleted = (item) => normalizeSfKey(item.salesforceStatus) === "completed";
+  const sfIsOnSite = (item) => normalizeSfKey(item.salesforceStatus) === "onsite";
+
+  const sfFlattenPlannerCases = () =>
+    Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
+      (dateCases || []).map((item) => ({ ...item, displayDateKey: dateKey }))
+    );
+
+  const sfScorePlannerMatch = (sfCase, plannerCase, mode = "normal") => {
+    const dateMatches = sfCase.dateKey && sfCase.dateKey === plannerCase.displayDateKey;
+    if (!dateMatches) {
+      return { plannerCase, score: 0, status: "No Match", reasons: ["date mismatch"] };
+    }
+
+    const facilityScore = sfSimilarityScore(sfCase.facility, plannerCase.facility);
+    const surgeonScore = sfSurgeonScore(sfCase.surgeon, plannerCase.surgeon);
+    const procedureScore = sfSimilarityScore(sfCase.procedure, plannerCase.procedure);
+    const timeDiff = sfTimeDifferenceMinutes(sfCase.time, plannerCase.time);
+    const hasBothTimes = parseTimeToMinutes(sfCase.time) !== null && parseTimeToMinutes(plannerCase.time) !== null;
+
+    let score = 25;
+    const reasons = ["date"];
+
+    if (mode === "reconcile") {
+      if (!plannerCase.fastTracking) return { plannerCase, score: 0, status: "No Match", reasons: ["not fast tracked"] };
+      score += 20;
+      reasons.push("fast tracked");
+    }
+
+    if (hasBothTimes && timeDiff !== null && timeDiff <= 15) {
+      score += 25;
+      reasons.push(timeDiff === 0 ? "exact time" : `time within ${timeDiff} min`);
+    } else if (hasBothTimes && timeDiff !== null && timeDiff <= 30) {
+      score += 12;
+      reasons.push(`time within ${timeDiff} min`);
+    } else if (!hasBothTimes) {
+      score += mode === "reconcile" ? 0 : 5;
+      reasons.push("time missing");
+    }
+
+    if (facilityScore >= 0.7) reasons.push("facility");
+    if (surgeonScore >= 0.7) reasons.push("surgeon");
+    if (procedureScore >= 0.5) reasons.push("procedure");
+
+    score += facilityScore * 20;
+    score += surgeonScore * 20;
+    score += procedureScore * 15;
+
+    let status = "No Match";
+    if (mode === "reconcile") {
+      if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && score >= 80) status = "Match";
+      else if (plannerCase.fastTracking && facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+    } else {
+      if (facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5 && hasBothTimes && timeDiff !== null && timeDiff <= 15 && score >= 80) status = "Match";
+      else if (facilityScore >= 0.7 && surgeonScore >= 0.7 && score >= 65) status = "Possible Match";
+    }
+
+    return { plannerCase, score: Math.round(score), status, reasons };
+  };
+
+  const sfGetPlannerMatches = (sfCase, mode = "normal") =>
+    sfFlattenPlannerCases()
+      .map((plannerCase) => sfScorePlannerMatch(sfCase, plannerCase, mode))
+      .filter((match) => match.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+  const sfSuggestedAction = (item, screenshotType = "") => {
+    const recommended = normalizeSfKey(item.recommendedAction);
+    const type = normalizeSfKey(screenshotType);
+    const hasScheduledDate = Boolean(normalizeSfText(item.scheduledDate));
+
+    // Scheduled Procedures screen is different from Account Procedure History.
+    // These are newly scheduled rows and should become fastTracking cases.
+    if (type.includes("scheduled procedures") || recommended.includes("import new fast tracking")) return "importNew";
+
+    // Account Procedure History rule:
+    // Scheduled column controls fastTracking. Status controls reconciled.
+    if (hasScheduledDate && sfIsCompleted(item)) return "markReconciled";
+    if (hasScheduledDate) return "ignore";
+
+    // No Scheduled date means this case was NOT fast tracked.
+    // Completed means reconciled true, but fastTracking must stay false.
+    if (sfIsCompleted(item)) return "importNewNormalReconciled";
+    if (sfIsOnSite(item)) return "importNewNormal";
+
+    // Fallback to AI recommendation only when status/scheduled fields do not make it obvious.
+    if (recommended.includes("mark existing")) return "markReconciled";
+    if (recommended.includes("already fast tracked")) return "ignore";
+    if (recommended.includes("not fast tracked") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("not fast tracked")) return "importNewNormal";
+    if (recommended.includes("import new") && recommended.includes("reconciled")) return "importNewNormalReconciled";
+    if (recommended.includes("import new")) return "importNewNormal";
+
+    return "review";
+  };
+
+  const sfHasRequiredNewCaseFields = (item, screenshotType = "") => {
+    const type = normalizeSfKey(screenshotType);
+    const requiresTime = type.includes("scheduled procedures");
+
+    if (!item.dateKey || !item.facility || !item.surgeon || !item.procedure) return false;
+    if (requiresTime && !item.time) return false;
+
+    return true;
+  };
+
+  const sfActionLabel = (action) => {
+    if (action === "importNew") return "Import New Fast Tracked";
+    if (action === "importNewReconciled") return "Import New FT + Reconciled";
+    if (action === "importNewNormal") return "Import New Non-FT Case";
+    if (action === "importNewNormalReconciled") return "Import New Non-FT + Reconciled";
+    if (action === "markFastTracking") return "Mark Existing Fast Tracked";
+    if (action === "markReconciled") return "Mark Existing FT Case Reconciled";
+    if (action === "markReconciledOnly") return "Mark Existing Case Reconciled";
+    if (action === "ignore") return "Ignore / No Duplicate";
+    return "Needs Review";
+  };
+
+  const sfActionBadgeClass = (action) => {
+    if (action === "markReconciled" || action === "markReconciledOnly" || action === "importNewReconciled" || action === "importNewNormalReconciled") return "bg-green-100 text-green-700";
+    if (action === "importNew" || action === "markFastTracking") return "bg-blue-100 text-blue-700";
+    if (action === "importNewNormal") return "bg-slate-100 text-slate-700";
+    if (action === "ignore") return "bg-slate-100 text-slate-600";
+    return "bg-yellow-100 text-yellow-800";
+  };
+
+  const sfMatchLabel = (status) => {
+    if (status === "Match") return "Exact Match";
+    if (status === "Possible Match") return "Possible Match";
+    return "No Match";
+  };
+
+  const sfMatchBadgeClass = (status) => {
+    if (status === "Match") return "bg-green-100 text-green-700";
+    if (status === "Possible Match") return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-700";
+  };
+
+  const sfResolveRowReviewState = (baseRow, screenshotType) => {
+    const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
+    const screenshotKey = normalizeSfKey(screenshotType);
+    const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
+    const isScheduledProceduresRow = screenshotKey.includes("scheduled procedures") || recommendedKey.includes("import new fast tracking");
+    const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
+    const matches = sfGetPlannerMatches(baseRow, matchMode);
+    const bestMatch = matches[0];
+
+    let action = "review";
+    let selectedPlannerCaseId = "";
+
+    // Scheduled Procedures rows are clean scheduled-case imports.
+    // If an exact duplicate already exists and is already fast tracked, ignore it.
+    // If an exact duplicate exists but is not fast tracked, mark that existing case fast tracked.
+    // If no match exists and required fields are present, import a new fast tracked case.
+    if (isScheduledProceduresRow) {
+      if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+        action = "review";
+      } else if (bestMatch?.status === "Match") {
+        if (bestMatch.plannerCase.fastTracking) {
+          action = "ignore";
+        } else {
+          action = "markFastTracking";
+          selectedPlannerCaseId = bestMatch.plannerCase.id;
+        }
+      } else if (bestMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = "importNew";
+      }
+    } else if (suggestedAction === "ignore") {
+      action = "ignore";
+    } else if (suggestedAction === "markReconciled") {
+      // Account History: Scheduled + Completed. Only auto-select reconciliation when
+      // there is a confident existing fast-tracked match.
+      if (bestMatch?.status === "Match") {
+        action = "markReconciled";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = "review";
+        selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
+      }
+    } else if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
+      // Account History rows without Scheduled date are not fast tracked.
+      // If an exact duplicate already exists, update only reconciliation when needed,
+      // otherwise ignore duplicate normal rows.
+      if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
+        action = "review";
+      } else if (bestMatch?.status === "Match") {
+        if (suggestedAction === "importNewNormalReconciled") {
+          action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciledOnly";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else if (suggestedAction === "importNewReconciled") {
+          action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciled";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else if (suggestedAction === "importNew") {
+          action = bestMatch.plannerCase.fastTracking ? "ignore" : "markFastTracking";
+          selectedPlannerCaseId = action === "ignore" ? "" : bestMatch.plannerCase.id;
+        } else {
+          action = "ignore";
+        }
+      } else if (bestMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestMatch.plannerCase.id;
+      } else {
+        action = suggestedAction;
+      }
+    }
+
+    return {
+      suggestedAction,
+      action,
+      selectedPlannerCaseId,
+      matchStatus: bestMatch?.status || "No Match",
+      matchScore: bestMatch?.score || 0,
+      matchReasons: bestMatch?.reasons || [],
+    };
+  };
+
+  const sfPrepareRows = (rows, screenshotType) =>
+    rows.map((item, index) => {
+      const baseRow = {
+        id: `sf-row-${Date.now()}-${index}`,
+        date: normalizeSfText(item.date),
+        dateKey: sfDateToDateKey(item.date),
+        time: normalizeSfText(item.time),
+        facility: normalizeSfText(item.hospital),
+        category: normalizeSfText(item.category),
+        procedure: normalizeSfText(item.procedure),
+        surgeon: normalizeSfText(item.surgeon),
+        scheduledDate: normalizeSfText(item.scheduledDate),
+        salesforceStatus: normalizeSfText(item.salesforceStatus),
+        recommendedAction: normalizeSfText(item.recommendedAction),
+        confidence: normalizeSfText(item.confidence || "Medium"),
+        notes: normalizeSfText(item.notes),
+        actionManuallyEdited: false,
+      };
+
+      return {
+        ...baseRow,
+        ...sfResolveRowReviewState(baseRow, screenshotType),
+      };
+    });
+
+  useEffect(() => {
+    if (!sfExtractedCases.length || !sfScreenshotType) return;
+
+    setSfExtractedCases((prev) => {
+      let changed = false;
+
+      const next = prev.map((item) => {
+        if (item.actionManuallyEdited) return item;
+
+        const resolved = sfResolveRowReviewState(item, sfScreenshotType);
+        const updated = { ...item, ...resolved };
+
+        if (
+          updated.action !== item.action ||
+          updated.selectedPlannerCaseId !== item.selectedPlannerCaseId ||
+          updated.matchStatus !== item.matchStatus ||
+          updated.matchScore !== item.matchScore ||
+          JSON.stringify(updated.matchReasons || []) !== JSON.stringify(item.matchReasons || [])
+        ) {
+          changed = true;
+        }
+
+        return updated;
+      });
+
+      return changed ? next : prev;
+    });
+  }, [casesByDate, sfScreenshotType, sfExtractedCases.length]);
+
+  const sfEffectiveRow = (item) => {
+    if (item.actionManuallyEdited) return item;
+    const resolved = sfResolveRowReviewState(item, sfScreenshotType);
+    return { ...item, ...resolved };
+  };
+
+  const updateSalesforceRow = (id, patch) => {
+    const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
+    setSfExtractedCases((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...patch,
+              actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
+            }
+          : item
+      )
+    );
+    setSfApplySummary("");
+  };
+
+  const getSfPlannerCaseOptions = (sfCase) => {
+    const mode = sfCase.action === "markReconciled" ? "reconcile" : "normal";
+    const matches = sfGetPlannerMatches(sfCase, mode);
+
+    if (sfCase.action === "markReconciled") {
+      const filtered = matches.filter((match) =>
+        match.plannerCase.fastTracking &&
+        match.plannerCase.displayDateKey === sfCase.dateKey &&
+        sfSimilarityScore(sfCase.facility, match.plannerCase.facility) >= 0.7
+      );
+      return filtered.length ? filtered : matches.slice(0, 10);
+    }
+
+    if (sfCase.action === "markReconciledOnly") {
+      const filtered = matches.filter((match) =>
+        match.plannerCase.displayDateKey === sfCase.dateKey &&
+        sfSimilarityScore(sfCase.facility, match.plannerCase.facility) >= 0.7
+      );
+      return filtered.length ? filtered : matches.slice(0, 10);
+    }
+
+    return matches.slice(0, 10);
+  };
+
+  const applySalesforceRowsToPlanner = () => {
+    const now = new Date().toISOString();
+    const rowsToApply = sfExtractedCases.filter((item) => item.action !== "review");
+    const reviewCount = sfExtractedCases.length - rowsToApply.length;
+    let importedCount = 0;
+    let reconciledCount = 0;
+    let fastTrackedCount = 0;
+    let ignoredCount = 0;
+    let skippedCount = reviewCount;
+    const newFacilities = new Set();
+    const firstAppliedDate = rowsToApply.find((item) => item.dateKey)?.dateKey;
+
+    setCasesByDate((prev) => {
+      const next = { ...prev };
+
+      rowsToApply.forEach((item) => {
+        const dateKey = item.dateKey;
+
+        if (item.action === "ignore") {
+          ignoredCount += 1;
+          return;
+        }
+
+        if (!dateKey) {
+          skippedCount += 1;
+          return;
+        }
+
+        const existingCases = next[dateKey] || [];
+
+        if (item.action === "markReconciled" || item.action === "markReconciledOnly" || item.action === "markFastTracking") {
+          const matchedId = item.selectedPlannerCaseId;
+          if (!matchedId) {
+            skippedCount += 1;
+            return;
+          }
+
+          let didUpdate = false;
+          next[dateKey] = existingCases.map((existingCase) => {
+            if (existingCase.id !== matchedId) return existingCase;
+            didUpdate = true;
+            if (item.action === "markReconciled" || item.action === "markReconciledOnly") reconciledCount += 1;
+            if (item.action === "markFastTracking") fastTrackedCount += 1;
+            return {
+              ...existingCase,
+              fastTracking: item.action === "markReconciledOnly" ? Boolean(existingCase.fastTracking) : true,
+              reconciled: item.action === "markReconciled" || item.action === "markReconciledOnly" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
+              notes: existingCase.notes || item.notes ? [existingCase.notes, item.notes ? `SF Import: ${item.notes}` : ""].filter(Boolean).join("\n") : existingCase.notes,
+              salesforceImportedAt: now,
+              salesforceStatus: item.salesforceStatus,
+              salesforceScheduledDate: item.scheduledDate,
+            };
+          });
+
+          if (!didUpdate) skippedCount += 1;
+          return;
+        }
+
+        if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(item.action)) {
+          const facility = item.facility || sfAccountName || "";
+          const newCase = {
+            ...blankCase(dateKey, facility),
+            time: item.time || "",
+            surgeon: item.surgeon || "",
+            procedure: item.procedure || "",
+            fastTracking: item.action === "importNew" || item.action === "importNewReconciled",
+            reconciled: item.action === "importNewReconciled" || item.action === "importNewNormalReconciled" || sfIsCompleted(item),
+            growth: isAutoGrowthSurgeon(item.surgeon || ""),
+            notes: item.notes ? `SF Import: ${item.notes}` : "SF Import",
+            salesforceImportedAt: now,
+            salesforceStatus: item.salesforceStatus,
+            salesforceScheduledDate: item.scheduledDate,
+          };
+
+          next[dateKey] = [...existingCases, newCase].sort(compareCasesByTime);
+          if (facility) newFacilities.add(facility);
+          importedCount += 1;
+        }
+      });
+
+      return next;
+    });
+
+    if (newFacilities.size) {
+      setFacilities((prev) => Array.from(new Set([...prev, ...newFacilities])).sort((a, b) => a.localeCompare(b)));
+      setSurgeonRosters((prev) => {
+        const next = { ...prev };
+        newFacilities.forEach((facility) => {
+          if (!next[facility]) next[facility] = [];
+        });
+        return next;
+      });
+    }
+
+    if (firstAppliedDate) setSelectedDate(firstAppliedDate);
+
+    setSfExtractedCases((prev) => prev.filter((item) => item.action === "review"));
+    setSfApplySummary(`Applied ${importedCount + reconciledCount + fastTrackedCount + ignoredCount} row(s): ${importedCount} imported, ${reconciledCount} reconciled, ${fastTrackedCount} marked fast tracked, ${ignoredCount} ignored. ${skippedCount ? `${skippedCount} row(s) still need review or were skipped.` : ""}`.trim());
+  };
+
+  const resetSalesforceImport = () => {
+    setSfFile(null);
+    setSfPreviewUrl("");
+    setSfLoading(false);
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+    setSfApplySummary("");
+    setShowSfMobileReference(false);
+  };
+
+  const handleSalesforceFileChange = (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+
+    setSfFile(selectedFile);
+    setSfPreviewUrl(URL.createObjectURL(selectedFile));
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+    setSfApplySummary("");
+    setShowSfMobileReference(false);
+  };
+
+  const extractSalesforceCases = async () => {
+    if (!sfFile) {
+      setSfError("Upload a Salesforce screenshot first.");
+      return;
+    }
+
+    setSfLoading(true);
+    setSfError("");
+    setSfScreenshotType("");
+    setSfAccountName("");
+    setSfExtractedCases([]);
+
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Could not read the screenshot file."));
+        reader.readAsDataURL(sfFile);
+      });
+
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+
+      const response = await fetch("/api/extract-salesforce-cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mimeType: sfFile.type || "image/png",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "AI extraction failed.");
+      }
+
+      const rows = Array.isArray(data.cases) ? data.cases : [];
+
+      setSfScreenshotType(data.screenshotType || "unknown");
+      setSfAccountName(data.accountName || "");
+      setSfExtractedCases(sfPrepareRows(rows, data.screenshotType || "unknown"));
+      setSfApplySummary("");
+    } catch (error) {
+      setSfError(error instanceof Error ? error.message : "Something went wrong extracting Salesforce cases.");
+    } finally {
+      setSfLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
+    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -1381,33 +1949,6 @@ export default function ORPlannerApp() {
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
 
-              {showSalesforceImport && (
-                <div className="w-full space-y-3 rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
-                  <div>
-                    <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
-                    <p className="mt-1 text-xs text-blue-700">
-                      This is where the Salesforce screenshot workflow will live. Next step is wiring the OCR import/reconcile logic into this panel.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-2 rounded-2xl bg-white p-3 text-xs text-slate-600 ring-1 ring-blue-100">
-                    <div className="font-bold text-slate-800">Planned workflow</div>
-                    <div>1. Upload Salesforce screenshot</div>
-                    <div>2. Extract cases with AI</div>
-                    <div>3. Review matches before applying</div>
-                    <div>4. Import new fast tracked cases or reconcile existing ones</div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full rounded-2xl bg-blue-200 px-4 py-3 text-sm font-bold text-blue-800 opacity-70"
-                  >
-                    Salesforce OCR coming next
-                  </button>
-                </div>
-              )}
-
               <div className={`${addCasePanelClass} space-y-3 md:space-y-4`}>
                 <div className="space-y-1.5 md:space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Search</label>
@@ -1766,6 +2307,283 @@ export default function ORPlannerApp() {
               )}
             </div>
           </motion.div>
+        </div>
+      )}
+
+
+      {showSalesforceImport && (
+        <div className="fixed inset-0 z-50 flex bg-slate-950/50 p-0 backdrop-blur-sm md:items-center md:justify-center md:p-6">
+          <div className="flex h-full w-full flex-col overflow-hidden bg-slate-50 shadow-2xl md:h-[88vh] md:max-w-5xl md:rounded-3xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 md:px-6">
+              <div className="min-w-0">
+                <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
+                <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v2l · desktop image zoom</div>
+                <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                  Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
+                </p>
+              </div>
+
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={resetSalesforceImport}
+                  className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSalesforceImport(false)}
+                  className="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+              <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
+                <div className="space-y-3 lg:sticky lg:top-3 lg:max-h-[calc(88vh-120px)] lg:self-start lg:overflow-y-auto lg:pr-1">
+                  <div className="rounded-3xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-200 bg-white p-3 text-center text-sm font-bold text-blue-800 transition hover:bg-blue-50">
+                      <Upload className="mb-1 h-5 w-5" />
+                      <span className="max-w-full break-words">{sfFile ? sfFile.name : "Upload Salesforce screenshot"}</span>
+                      <span className="mt-1 text-xs font-medium text-blue-500">PNG, JPG, JPEG, or WEBP</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp"
+                        onChange={handleSalesforceFileChange}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {sfPreviewUrl && (
+                      <div className="mt-4 rounded-2xl border border-blue-100 bg-white p-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSfDesktopReference(true)}
+                          className="hidden w-full cursor-zoom-in rounded-xl bg-white p-0 text-left lg:block"
+                          title="Click to enlarge screenshot"
+                        >
+                          <img
+                            src={sfPreviewUrl}
+                            alt="Salesforce screenshot preview"
+                            className="max-h-44 w-full rounded-xl object-contain lg:max-h-[34vh]"
+                          />
+                        </button>
+                        <img
+                          src={sfPreviewUrl}
+                          alt="Salesforce screenshot preview"
+                          className="max-h-44 w-full rounded-xl object-contain lg:hidden"
+                        />
+                        <div className="mt-2 text-center text-[11px] font-semibold text-slate-400">
+                          Desktop: click image to enlarge · Mobile: use floating viewer
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={extractSalesforceCases}
+                      disabled={!sfFile || sfLoading}
+                      className="mt-3 w-full rounded-2xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-50"
+                    >
+                      {sfLoading ? "Extracting with AI..." : "Extract Cases with AI"}
+                    </button>
+
+                    {sfError && (
+                      <div className="mt-4 rounded-2xl bg-red-50 p-3 text-xs font-semibold text-red-700 ring-1 ring-red-100">
+                        {sfError}
+                      </div>
+                    )}
+                  </div>
+
+                  {(sfScreenshotType || sfExtractedCases.length > 0) && (
+                    <div className="rounded-3xl bg-white p-3 text-sm text-slate-600 ring-1 ring-slate-200">
+                      <div className="font-bold text-slate-900">Extraction Result</div>
+                      <div className="mt-2">Type: <span className="font-semibold">{sfScreenshotType || "unknown"}</span></div>
+                      {sfAccountName && <div>Account: <span className="font-semibold">{sfAccountName}</span></div>}
+                      <div>Rows found: <span className="font-semibold">{sfExtractedCases.length}</span></div>
+                    </div>
+                  )}
+
+                  {sfExtractedCases.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={applySalesforceRowsToPlanner}
+                      className="w-full rounded-2xl bg-green-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-green-800"
+                    >
+                      Apply Reviewed Rows to OR Planner
+                    </button>
+                  )}
+
+                  {sfApplySummary && (
+                    <div className="rounded-3xl bg-green-50 p-3 text-sm font-semibold text-green-800 ring-1 ring-green-100">
+                      {sfApplySummary}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 pb-8">
+                  {sfExtractedCases.length > 0 ? (
+                    <div className="space-y-3">
+                      {sfExtractedCases.map((item, index) => {
+                        return (
+                        <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-bold text-slate-900">Row {index + 1}</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {item.suggestedAction && item.suggestedAction !== item.action && (
+                                <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.suggestedAction)}`}>Suggested: {sfActionLabel(item.suggestedAction)}</div>
+                              )}
+                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfActionBadgeClass(item.action)}`}>Selected: {sfActionLabel(item.action)}</div>
+                              <div className={`rounded-full px-3 py-1 text-xs font-bold ${sfMatchBadgeClass(item.matchStatus)}`}>Match: {sfMatchLabel(item.matchStatus)}</div>
+                              <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{item.confidence}</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            <div><span className="font-bold">Date:</span> {item.date || "—"}</div>
+                            <div><span className="font-bold">Time:</span> {item.time || "—"}</div>
+                            <div><span className="font-bold">Facility:</span> {item.facility || "—"}</div>
+                            <div><span className="font-bold">Surgeon:</span> {item.surgeon || "—"}</div>
+                            <div className="md:col-span-2"><span className="font-bold">Procedure:</span> {item.procedure || "—"}</div>
+                            {(item.scheduledDate || item.salesforceStatus) && (
+                              <div className="md:col-span-2">
+                                <span className="font-bold">Salesforce:</span> Scheduled {item.scheduledDate || "—"} · Status {item.salesforceStatus || "—"}
+                              </div>
+                            )}
+                            {item.recommendedAction && (
+                              <div className="md:col-span-2">
+                                <span className="font-bold">AI Action:</span> {item.recommendedAction}
+                              </div>
+                            )}
+                            {item.notes && (
+                              <div className="md:col-span-2 text-slate-500">
+                                <span className="font-bold">Notes:</span> {item.notes}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-1 block text-xs font-bold text-slate-500">Review Action</span>
+                              <select
+                                value={item.action}
+                                onChange={(event) => updateSalesforceRow(item.id, { action: event.target.value, selectedPlannerCaseId: ["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled", "ignore", "review"].includes(event.target.value) ? "" : item.selectedPlannerCaseId })}
+                                className="input bg-white"
+                              >
+                                <option value="review">Needs Review</option>
+                                <option value="importNew">Import New Fast Tracked</option>
+                                <option value="importNewReconciled">Import New FT + Reconciled</option>
+                                <option value="importNewNormal">Import New Non-FT Case</option>
+                                <option value="importNewNormalReconciled">Import New Non-FT + Reconciled</option>
+                                <option value="markFastTracking">Mark Existing Fast Tracked</option>
+                                <option value="markReconciled">Mark Existing FT Case Reconciled</option>
+                                <option value="markReconciledOnly">Mark Existing Case Reconciled</option>
+                                <option value="ignore">Ignore / No Duplicate</option>
+                              </select>
+                            </label>
+
+                            {(item.action === "markReconciled" || item.action === "markReconciledOnly" || item.action === "markFastTracking") && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Matching OR Planner Case</span>
+                                <select
+                                  value={item.selectedPlannerCaseId || ""}
+                                  onChange={(event) => updateSalesforceRow(item.id, { selectedPlannerCaseId: event.target.value })}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Select matching case</option>
+                                  {getSfPlannerCaseOptions(item).map((match) => (
+                                    <option key={`${item.id}-${match.plannerCase.id}`} value={match.plannerCase.id}>
+                                      {formatShortDate(match.plannerCase.displayDateKey)} · {match.plannerCase.time || "No time"} · {match.plannerCase.facility || "No Facility"} · {match.plannerCase.surgeon || "No Surgeon"} · {match.plannerCase.procedure || "No Procedure"} · FT {match.plannerCase.fastTracking ? "Yes" : "No"} · REC {match.plannerCase.reconciled ? "Yes" : "No"}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+
+                            <div className="text-xs text-slate-500 md:col-span-2">
+                              <span className="font-bold text-slate-700">Best match:</span> {sfMatchLabel(item.matchStatus)} {item.matchReasons?.length ? `· ${item.matchReasons.join(", ")}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[320px] items-center justify-center rounded-3xl bg-white p-6 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+                      Upload a screenshot and click Extract Cases with AI. Results will appear here in this window.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {sfPreviewUrl && (
+            <button
+              type="button"
+              onClick={() => setShowSfMobileReference(true)}
+              className="fixed bottom-4 left-4 z-[60] rounded-full bg-blue-700 px-4 py-3 text-xs font-bold text-white shadow-2xl ring-1 ring-blue-200 lg:hidden"
+            >
+              View Screenshot
+            </button>
+          )}
+
+          {sfPreviewUrl && showSfMobileReference && (
+            <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950/90 p-3 lg:hidden">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase tracking-wide text-blue-200">Salesforce Screenshot</div>
+                  <div className="truncate text-sm font-semibold text-white">{sfFile?.name || "Uploaded image"}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSfMobileReference(false)}
+                  className="rounded-2xl bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm"
+                >
+                  Done
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-3xl bg-white p-2">
+                <img
+                  src={sfPreviewUrl}
+                  alt="Salesforce screenshot full reference"
+                  className="min-h-full w-full rounded-2xl object-contain"
+                />
+              </div>
+            </div>
+          )}
+
+          {sfPreviewUrl && showSfDesktopReference && (
+            <div className="fixed inset-0 z-[70] hidden flex-col bg-slate-950/90 p-6 lg:flex">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase tracking-wide text-blue-200">Salesforce Screenshot</div>
+                  <div className="truncate text-sm font-semibold text-white">{sfFile?.name || "Uploaded image"}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSfDesktopReference(false)}
+                  className="rounded-2xl bg-white px-5 py-2.5 text-sm font-bold text-slate-900 shadow-sm"
+                >
+                  Done
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-3xl bg-white p-3">
+                <img
+                  src={sfPreviewUrl}
+                  alt="Salesforce screenshot enlarged desktop reference"
+                  className="mx-auto min-h-full max-w-none rounded-2xl object-contain"
+                />
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
