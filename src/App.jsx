@@ -2442,16 +2442,16 @@ export default function ORPlannerApp() {
         </Card>
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className={showSurgeonRosterPanel ? "p-4" : "px-4 py-3"}>
+          <CardContent className={showSurgeonRosterPanel ? "p-4" : "px-4 py-2"}>
             {!showSurgeonRosterPanel ? (
-              <div className="flex items-start justify-between gap-3 text-sm">
-                <div>
-                  <div className="font-bold leading-tight">Surgeon Rosters</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">{Object.values(surgeonRosters).flat().length} surgeons saved</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Surgeon Rosters</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{Object.values(surgeonRosters).flat().length} saved</span>
                 </div>
                 <button
                   onClick={() => setShowSurgeonRosterPanel(true)}
-                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
                 >
                   Manage Surgeons ▼
                 </button>
@@ -2553,16 +2553,16 @@ export default function ORPlannerApp() {
 
 
         <Card className="rounded-3xl shadow-sm">
-          <CardContent className={showProcedureRosterPanel ? "p-4" : "px-4 py-3"}>
+          <CardContent className={showProcedureRosterPanel ? "p-4" : "px-4 py-2"}>
             {!showProcedureRosterPanel ? (
-              <div className="flex items-start justify-between gap-3 text-sm">
-                <div>
-                  <div className="font-bold leading-tight">Procedure Roster</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">{procedureRosterItems.length} saved procedures</div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">Procedure Roster</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{procedureRosterItems.length} saved</span>
                 </div>
                 <button
                   onClick={() => setShowProcedureRosterPanel(true)}
-                  className="shrink-0 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                  className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
                 >
                   Manage Procedures ▼
                 </button>
@@ -3108,7 +3108,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3c · editable facilities and surgeons</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3d · roster header alignment</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
