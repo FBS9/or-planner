@@ -236,6 +236,7 @@ export default function ORPlannerApp() {
   const [caseTemplateTime, setCaseTemplateTime] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
+  const [showSalesforceImport, setShowSalesforceImport] = useState(false);
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
@@ -1315,12 +1316,26 @@ export default function ORPlannerApp() {
                     </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowMobileAddCase((prev) => !prev)}
-                  className={`rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm ${isDesktopLayout ? "hidden" : isMobileLayout ? "inline-flex" : "md:hidden"}`}
-                >
-                  {showMobileAddCase ? "Close" : "Add Case"}
-                </button>
+                <div className={`flex gap-2 ${isDesktopLayout ? "hidden" : isMobileLayout ? "inline-flex" : "md:hidden"}`}>
+                  <button
+                    onClick={() => {
+                      setShowSalesforceImport((prev) => !prev);
+                      setShowMobileAddCase(false);
+                    }}
+                    className={`rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${showSalesforceImport ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700 ring-1 ring-blue-200"}`}
+                  >
+                    {showSalesforceImport ? "Close SF" : "SF Import"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileAddCase((prev) => !prev);
+                      setShowSalesforceImport(false);
+                    }}
+                    className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm"
+                  >
+                    {showMobileAddCase ? "Close" : "Add Case"}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1365,6 +1380,33 @@ export default function ORPlannerApp() {
                 </label>
                 {facilities.length === 0 && <p className="text-xs text-slate-500">Add facilities in Surgeon Rosters before logging cases.</p>}
               </div>
+
+              {showSalesforceImport && (
+                <div className="space-y-3 rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                  <div>
+                    <h3 className="text-base font-bold text-blue-900">Salesforce Import</h3>
+                    <p className="mt-1 text-xs text-blue-700">
+                      This is where the Salesforce screenshot workflow will live. Next step is wiring the OCR import/reconcile logic into this panel.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2 rounded-2xl bg-white p-3 text-xs text-slate-600 ring-1 ring-blue-100">
+                    <div className="font-bold text-slate-800">Planned workflow</div>
+                    <div>1. Upload Salesforce screenshot</div>
+                    <div>2. Extract cases with AI</div>
+                    <div>3. Review matches before applying</div>
+                    <div>4. Import new fast tracked cases or reconcile existing ones</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full rounded-2xl bg-blue-200 px-4 py-3 text-sm font-bold text-blue-800 opacity-70"
+                  >
+                    Salesforce OCR coming next
+                  </button>
+                </div>
+              )}
 
               <div className={`${addCasePanelClass} space-y-3 md:space-y-4`}>
                 <div className="space-y-1.5 md:space-y-2">
