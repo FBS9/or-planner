@@ -294,6 +294,7 @@ export default function ORPlannerApp() {
   const lastSavedSnapshotRef = useRef("");
   const isApplyingCloudRef = useRef(false);
   const lastAutoCloudPullAtRef = useRef(0);
+  const autoCloudSyncInFlightRef = useRef(false);
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
@@ -647,46 +648,46 @@ export default function ORPlannerApp() {
   }, [plannerLoaded, cloudSession?.user?.id]);
 
   useEffect(() => {
-    if (!plannerLoaded || !cloudSession?.user?.id) return;
+    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
 
-    const pullLatestCloudData = () => {
+    const runTwoSecondCloudSync = async () => {
       if (document.visibilityState && document.visibilityState !== "visible") return;
-      const now = Date.now();
-      if (now - lastAutoCloudPullAtRef.current < 15000) return;
-      lastAutoCloudPullAtRef.current = now;
-      setAutoCloudReady(false);
-      performCloudPull({ silent: true });
+      if (isApplyingCloudRef.current || autoCloudSyncInFlightRef.current) return;
+
+      autoCloudSyncInFlightRef.current = true;
+      try {
+        const snapshot = getPlannerSnapshot();
+        const snapshotString = snapshotToString(snapshot);
+
+        // If this device has local changes, push them first so a frequent pull
+        // does not overwrite edits/imports that have not reached Supabase yet.
+        if (snapshotString !== lastSavedSnapshotRef.current) {
+          setCloudSyncActivity("Auto-saving...");
+          await performCloudSave({ silent: true });
+        } else {
+          setCloudSyncActivity("Checking cloud...");
+          await performCloudPull({ silent: true });
+        }
+      } finally {
+        autoCloudSyncInFlightRef.current = false;
+      }
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") pullLatestCloudData();
+      if (document.visibilityState === "visible") runTwoSecondCloudSync();
     };
 
-    window.addEventListener("focus", pullLatestCloudData);
-    window.addEventListener("pageshow", pullLatestCloudData);
+    const interval = window.setInterval(runTwoSecondCloudSync, 2000);
+    window.addEventListener("focus", runTwoSecondCloudSync);
+    window.addEventListener("pageshow", runTwoSecondCloudSync);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener("focus", pullLatestCloudData);
-      window.removeEventListener("pageshow", pullLatestCloudData);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", runTwoSecondCloudSync);
+      window.removeEventListener("pageshow", runTwoSecondCloudSync);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [plannerLoaded, cloudSession?.user?.id]);
-
-  useEffect(() => {
-    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
-    if (isApplyingCloudRef.current) return;
-
-    const snapshot = getPlannerSnapshot();
-    const snapshotString = snapshotToString(snapshot);
-    if (snapshotString === lastSavedSnapshotRef.current) return;
-
-    setCloudSyncActivity("Waiting 2s to save...");
-    const timeout = window.setTimeout(() => {
-      performCloudSave({ silent: true });
-    }, 2000);
-
-    return () => window.clearTimeout(timeout);
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
@@ -3185,7 +3186,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3k · auto cloud pull on open</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3l · cloud sync every 2s</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
