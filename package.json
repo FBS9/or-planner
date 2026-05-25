@@ -16,7 +16,8 @@
     "react": "latest",
     "react-dom": "latest",
     "framer-motion": "latest",
-    "lucide-react": "latest"
+    "lucide-react": "latest",
+    "openai": "latest"
   },
   "devDependencies": {
     "autoprefixer": "10.4.20",
