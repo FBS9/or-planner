@@ -277,6 +277,8 @@ export default function ORPlannerApp() {
   const [showProcedureList, setShowProcedureList] = useState(false);
   const [procedureRosterSpecialty, setProcedureRosterSpecialty] = useState(ALL_PROCEDURE_SPECIALTIES);
   const [procedureExclusions, setProcedureExclusions] = useState([]);
+  const [sfSurgeonAliases, setSfSurgeonAliases] = useState({});
+  const [sfProcedureAliases, setSfProcedureAliases] = useState({});
   const [editingProcedureRosterKey, setEditingProcedureRosterKey] = useState("");
   const [editingProcedureName, setEditingProcedureName] = useState("");
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
@@ -450,6 +452,8 @@ export default function ORPlannerApp() {
     facilities: sortedFacilities,
     surgeonRosters,
     procedureExclusions,
+    sfSurgeonAliases,
+    sfProcedureAliases,
     growthSurgeons,
     weekStartDay,
   });
@@ -465,6 +469,8 @@ export default function ORPlannerApp() {
     setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
     setGrowthSurgeons(Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : []);
     setProcedureExclusions(Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : []);
+    setSfSurgeonAliases(snapshot.sfSurgeonAliases && typeof snapshot.sfSurgeonAliases === "object" ? snapshot.sfSurgeonAliases : {});
+    setSfProcedureAliases(snapshot.sfProcedureAliases && typeof snapshot.sfProcedureAliases === "object" ? snapshot.sfProcedureAliases : {});
     setWeekStartDay(WEEK_START_OPTIONS.includes(snapshot.weekStartDay) ? snapshot.weekStartDay : "Sunday");
   };
 
@@ -482,6 +488,8 @@ export default function ORPlannerApp() {
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
+        setSfSurgeonAliases(parsed.sfSurgeonAliases && typeof parsed.sfSurgeonAliases === "object" ? parsed.sfSurgeonAliases : {});
+        setSfProcedureAliases(parsed.sfProcedureAliases && typeof parsed.sfProcedureAliases === "object" ? parsed.sfProcedureAliases : {});
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } else {
         const oldSaved = localStorage.getItem(OLD_STORAGE_KEY);
@@ -502,6 +510,8 @@ export default function ORPlannerApp() {
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
           setGrowthSurgeons(Array.isArray(old.growthSurgeons) ? old.growthSurgeons : []);
           setProcedureExclusions(Array.isArray(old.procedureExclusions) ? old.procedureExclusions : []);
+          setSfSurgeonAliases(old.sfSurgeonAliases && typeof old.sfSurgeonAliases === "object" ? old.sfSurgeonAliases : {});
+          setSfProcedureAliases(old.sfProcedureAliases && typeof old.sfProcedureAliases === "object" ? old.sfProcedureAliases : {});
           setWeekStartDay(migratedWeekStartDay);
         }
       }
@@ -515,7 +525,7 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(getPlannerSnapshot()));
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
     if (!plannerLoaded) return;
@@ -569,7 +579,7 @@ export default function ORPlannerApp() {
         localEditGuardUntilRef.current = Math.max(localEditGuardUntilRef.current, Date.now() + 3500);
       }
     }
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
@@ -593,7 +603,7 @@ export default function ORPlannerApp() {
     return () => {
       if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -667,6 +677,22 @@ export default function ORPlannerApp() {
     return normalized;
   };
 
+  const normalizeAliasMapForCloudCompare = (aliases = {}) => {
+    const normalized = {};
+    Object.keys(aliases || {}).sort((a, b) => String(a).localeCompare(String(b))).forEach((scopeKey) => {
+      const value = aliases[scopeKey];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        normalized[scopeKey] = {};
+        Object.keys(value).sort((a, b) => String(a).localeCompare(String(b))).forEach((aliasKey) => {
+          if (value[aliasKey]) normalized[scopeKey][aliasKey] = value[aliasKey];
+        });
+      } else if (value) {
+        normalized[scopeKey] = value;
+      }
+    });
+    return normalized;
+  };
+
   const normalizeCasesByDateForCloudCompare = (cases = {}) => {
     const normalized = {};
     Object.keys(cases || {}).sort((a, b) => a.localeCompare(b)).forEach((dateKey) => {
@@ -693,6 +719,8 @@ export default function ORPlannerApp() {
     facilities: sortStringArray(snapshot.facilities),
     surgeonRosters: normalizeSurgeonRostersForCloudCompare(snapshot.surgeonRosters || {}),
     procedureExclusions: sortStringArray(snapshot.procedureExclusions),
+    sfSurgeonAliases: normalizeAliasMapForCloudCompare(snapshot.sfSurgeonAliases || {}),
+    sfProcedureAliases: normalizeAliasMapForCloudCompare(snapshot.sfProcedureAliases || {}),
     growthSurgeons: sortStringArray(snapshot.growthSurgeons),
     weekStartDay: snapshot.weekStartDay || "Sunday",
   });
@@ -1016,7 +1044,7 @@ export default function ORPlannerApp() {
       window.removeEventListener("pointerdown", kickMobileCloudSync);
       document.removeEventListener("visibilitychange", kickMobileCloudSync);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -1538,6 +1566,8 @@ export default function ORPlannerApp() {
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
+        setSfSurgeonAliases(parsed.sfSurgeonAliases && typeof parsed.sfSurgeonAliases === "object" ? parsed.sfSurgeonAliases : {});
+        setSfProcedureAliases(parsed.sfProcedureAliases && typeof parsed.sfProcedureAliases === "object" ? parsed.sfProcedureAliases : {});
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
       } catch {
         alert("Could not import that file. Please use an exported OR Planner JSON backup.");
@@ -1548,7 +1578,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1688,12 +1718,60 @@ export default function ORPlannerApp() {
     return leftName.length >= rightName.length ? left : right;
   };
 
+
+  const sfAliasKey = (value = "") => normalizeSfKey(value || "");
+
+  const sfGetSurgeonAlias = (facility = "", sourceSurgeonName = "") => {
+    const facilityKey = sfAliasKey(facility);
+    const sourceKey = sfAliasKey(sourceSurgeonName);
+    if (!facilityKey || !sourceKey) return "";
+    return sfSurgeonAliases?.[facilityKey]?.[sourceKey] || "";
+  };
+
+  const sfRememberSurgeonAlias = (facility = "", sourceSurgeonName = "", rosterSurgeonName = "") => {
+    const facilityKey = sfAliasKey(facility);
+    const sourceKey = sfAliasKey(sourceSurgeonName);
+    const rosterName = normalizeSfText(rosterSurgeonName);
+    if (!facilityKey || !sourceKey || !rosterName) return;
+
+    setSfSurgeonAliases((prev) => ({
+      ...(prev || {}),
+      [facilityKey]: {
+        ...((prev || {})[facilityKey] || {}),
+        [sourceKey]: rosterName,
+      },
+    }));
+  };
+
+  const sfGetProcedureAlias = (sourceProcedure = "") => {
+    const sourceKey = sfAliasKey(sourceProcedure);
+    if (!sourceKey) return "";
+    return sfProcedureAliases?.[sourceKey] || "";
+  };
+
+  const sfRememberProcedureAlias = (sourceProcedure = "", rosterProcedureName = "") => {
+    const sourceKey = sfAliasKey(sourceProcedure);
+    const procedureName = normalizeSfText(rosterProcedureName);
+    if (!sourceKey || !procedureName) return;
+
+    setSfProcedureAliases((prev) => ({
+      ...(prev || {}),
+      [sourceKey]: procedureName,
+    }));
+  };
+
   const sfBestRosterSurgeonMatch = (facility = "", surgeonName = "") => {
     const normalizedFacility = normalizeSfText(facility);
     const normalizedSurgeon = normalizeSfText(surgeonName);
     if (!normalizedFacility || !normalizedSurgeon) return null;
 
     const candidates = surgeonRosters[normalizedFacility] || [];
+    const rememberedAlias = sfGetSurgeonAlias(normalizedFacility, normalizedSurgeon);
+    if (rememberedAlias) {
+      const aliasMatch = candidates.find((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(rememberedAlias));
+      if (aliasMatch) return { surgeon: aliasMatch, score: 1, alias: true };
+    }
+
     const ranked = candidates
       .map((surgeon) => ({ surgeon, score: sfSurgeonScore(surgeon?.name || "", normalizedSurgeon) }))
       .filter((candidate) => candidate.score >= 0.9)
@@ -1710,17 +1788,21 @@ export default function ORPlannerApp() {
   const sfCanonicalizeSurgeonForRow = (row) => {
     const facility = normalizeSfText(row?.facility);
     const surgeon = normalizeSfText(row?.surgeon);
+    const sourceSurgeon = normalizeSfText(row?.sourceSurgeonName || row?.surgeonCanonicalizedFrom || row?.surgeon);
     if (!facility || !surgeon) return row;
 
-    const canonicalName = sfCanonicalSurgeonNameForFacility(facility, surgeon);
-    if (!canonicalName || canonicalName === surgeon) return row;
+    const canonicalName = sfCanonicalSurgeonNameForFacility(facility, sourceSurgeon || surgeon);
+    if (!canonicalName || canonicalName === surgeon) {
+      return sourceSurgeon && !row?.sourceSurgeonName ? { ...row, sourceSurgeonName: sourceSurgeon } : row;
+    }
 
     return {
       ...row,
       surgeon: canonicalName,
       rosterSurgeonName: canonicalName,
       rosterSurgeonSubspecialty: getSubspecialty(surgeonRosters, facility, canonicalName) || row.rosterSurgeonSubspecialty || row.category || "",
-      surgeonCanonicalizedFrom: surgeon,
+      surgeonCanonicalizedFrom: sourceSurgeon || surgeon,
+      sourceSurgeonName: sourceSurgeon || surgeon,
     };
   };
 
@@ -1814,6 +1896,11 @@ export default function ORPlannerApp() {
     const normalizedProcedure = normalizeSfText(procedure);
     if (!normalizedProcedure) return null;
 
+    const rememberedAlias = sfGetProcedureAlias(normalizedProcedure);
+    if (rememberedAlias && !isProcedureHiddenFromRoster(rememberedAlias)) {
+      return { procedure: rememberedAlias, count: 999, score: 1, alias: true };
+    }
+
     const normalizedProcedureKey = normalizeSfKey(normalizedProcedure);
 
     const candidates = sfExistingProcedureCandidates(facility, surgeon, specialty, sourceCasesByDate)
@@ -1879,8 +1966,9 @@ export default function ORPlannerApp() {
     return {
       ...row,
       procedure: canonicalProcedure,
+      sourceProcedureName: row?.sourceProcedureName || procedure,
       procedureRosterMatchedName: canonicalProcedure,
-      procedureCanonicalizedFrom: sameProcedure ? "" : procedure,
+      procedureCanonicalizedFrom: sameProcedure ? "" : (row?.sourceProcedureName || procedure),
     };
   };
 
@@ -1997,6 +2085,73 @@ export default function ORPlannerApp() {
     });
 
     setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster.`);
+  };
+
+
+  const sfSelectExistingSurgeonForRow = (row, rosterSurgeonName) => {
+    const facility = normalizeSfText(row?.facility);
+    const canonicalName = normalizeSfText(rosterSurgeonName);
+    const sourceSurgeon = normalizeSfText(row?.sourceSurgeonName || row?.surgeonCanonicalizedFrom || row?.surgeon);
+    if (!facility || !canonicalName || !sourceSurgeon) return;
+
+    const rosterEntry = (surgeonRosters[facility] || []).find((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(canonicalName));
+    if (!rosterEntry) return;
+
+    sfRememberSurgeonAlias(facility, sourceSurgeon, rosterEntry.name);
+    updateSalesforceRow(row.id, {
+      surgeon: rosterEntry.name,
+      rosterSurgeonName: rosterEntry.name,
+      rosterSurgeonSubspecialty: rosterEntry.subspecialty || row?.rosterSurgeonSubspecialty || row?.category || "",
+      surgeonCanonicalizedFrom: sourceSurgeon,
+      sourceSurgeonName: sourceSurgeon,
+      actionManuallyEdited: false,
+    });
+    setSfApplySummary(`Remembered ${sourceSurgeon} as ${rosterEntry.name} for ${facility}. Future Salesforce imports will use that roster name.`);
+  };
+
+  const sfProcedureRosterOptionsForRow = (row) => {
+    const facility = normalizeSfText(row?.facility);
+    const surgeon = normalizeSfText(row?.surgeon);
+    const specialty = normalizeProcedureSearch(row?.rosterSurgeonSubspecialty || row?.category || getSurgeonSpecialty(surgeonRosters, facility, surgeon));
+
+    const scored = procedureRosterItems
+      .map((item) => {
+        const itemSpecialty = normalizeProcedureSearch(item.specialty || "");
+        const sameSpecialty = specialty && itemSpecialty && specialty === itemSpecialty;
+        const score = sfProcedureScore(item.procedure, row?.sourceProcedureName || row?.procedure || "");
+        return { ...item, sameSpecialty, score };
+      })
+      .filter((item) => item.procedure && !isProcedureHiddenFromRoster(item.procedure))
+      .sort((a, b) => {
+        if (a.sameSpecialty !== b.sameSpecialty) return a.sameSpecialty ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.count !== a.count) return b.count - a.count;
+        return a.procedure.localeCompare(b.procedure);
+      });
+
+    const seen = new Set();
+    return scored.filter((item) => {
+      const key = normalizeProcedureSearch(item.procedure);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 60);
+  };
+
+  const sfSelectExistingProcedureForRow = (row, rosterProcedureName) => {
+    const canonicalProcedure = normalizeSfText(rosterProcedureName);
+    const sourceProcedure = normalizeSfText(row?.sourceProcedureName || row?.procedureCanonicalizedFrom || row?.procedure);
+    if (!canonicalProcedure || !sourceProcedure) return;
+
+    sfRememberProcedureAlias(sourceProcedure, canonicalProcedure);
+    updateSalesforceRow(row.id, {
+      procedure: canonicalProcedure,
+      sourceProcedureName: sourceProcedure,
+      procedureRosterMatchedName: canonicalProcedure,
+      procedureCanonicalizedFrom: normalizeProcedureSearch(canonicalProcedure) === normalizeProcedureSearch(sourceProcedure) ? "" : sourceProcedure,
+      actionManuallyEdited: false,
+    });
+    setSfApplySummary(`Remembered ${sourceProcedure} as procedure roster item ${canonicalProcedure}. Future Salesforce imports will use that procedure name.`);
   };
 
   const sfFlattenPlannerCases = () =>
@@ -2240,7 +2395,9 @@ export default function ORPlannerApp() {
         facilityCanonicalizedFrom: facilityResolution.facilityCanonicalizedFrom || "",
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
+        sourceProcedureName: normalizeSfText(item.procedure),
         surgeon,
+        sourceSurgeonName: surgeon,
         rosterSurgeonName: surgeon,
         rosterSurgeonSubspecialty: normalizeSfText(item.category),
         scheduledDate: normalizeSfText(item.scheduledDate),
@@ -3534,7 +3691,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4f · sync preserves selected day</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4g · SF roster alias matching</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3645,6 +3802,10 @@ export default function ORPlannerApp() {
                   {sfExtractedCases.length > 0 ? (
                     <div className="space-y-3">
                       {sfExtractedCases.map((item, index) => {
+                        const surgeonRosterOptions = item.facility ? (surgeonRosters[item.facility] || []) : [];
+                        const procedureRosterOptions = sfProcedureRosterOptionsForRow(item);
+                        const selectedSurgeonIsInRoster = surgeonRosterOptions.some((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(item.surgeon || ""));
+                        const selectedProcedureIsInRoster = procedureRosterOptions.some((procedureItem) => normalizeProcedureSearch(procedureItem.procedure) === normalizeProcedureSearch(item.procedure || ""));
                         return (
                         <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3707,6 +3868,44 @@ export default function ORPlannerApp() {
                               </label>
                             )}
 
+                            {item.facility && item.surgeon && surgeonRosterOptions.length > 0 && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Use saved surgeon</span>
+                                <select
+                                  value={selectedSurgeonIsInRoster ? item.surgeon : ""}
+                                  onChange={(event) => sfSelectExistingSurgeonForRow(item, event.target.value)}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Choose roster surgeon</option>
+                                  {surgeonRosterOptions.map((surgeon) => (
+                                    <option key={`${item.id}-surgeon-${surgeon.name}`} value={surgeon.name}>{surgeon.name}{surgeon.subspecialty ? ` · ${surgeon.subspecialty}` : ""}</option>
+                                  ))}
+                                </select>
+                                {!selectedSurgeonIsInRoster && (
+                                  <span className="mt-1 block text-[11px] font-semibold text-slate-500">Selecting one remembers this Salesforce name for future imports.</span>
+                                )}
+                              </label>
+                            )}
+
+                            {item.procedure && procedureRosterOptions.length > 0 && (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-bold text-slate-500">Use saved procedure</span>
+                                <select
+                                  value={selectedProcedureIsInRoster ? item.procedure : ""}
+                                  onChange={(event) => sfSelectExistingProcedureForRow(item, event.target.value)}
+                                  className="input bg-white"
+                                >
+                                  <option value="">Choose procedure roster item</option>
+                                  {procedureRosterOptions.map((procedureItem) => (
+                                    <option key={`${item.id}-procedure-${procedureItem.specialty}-${procedureItem.procedure}`} value={procedureItem.procedure}>{procedureItem.procedure}{procedureItem.specialty ? ` · ${procedureItem.specialty}` : ""}</option>
+                                  ))}
+                                </select>
+                                {!selectedProcedureIsInRoster && (
+                                  <span className="mt-1 block text-[11px] font-semibold text-slate-500">Selecting one remembers this Salesforce procedure wording for future imports.</span>
+                                )}
+                              </label>
+                            )}
+
                             {(!item.surgeon || !item.procedure) && item.dateKey && (
                               <div className="rounded-2xl bg-blue-50 p-3 text-xs text-blue-900 ring-1 ring-blue-100 md:col-span-2">
                                 <div className="font-bold">Incomplete Salesforce row</div>
@@ -3723,7 +3922,7 @@ export default function ORPlannerApp() {
                               <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-100 md:col-span-2">
                                 <div className="font-bold">Surgeon not in this facility roster</div>
                                 <div className="mt-1">
-                                  {item.surgeon} is not currently saved under {item.facility}. Confirm how you want the surgeon saved before applying.
+                                  {item.surgeon} is not currently saved under {item.facility}. Choose an existing roster surgeon above if this is a Salesforce naming variation, or confirm how you want the surgeon saved before applying.
                                 </div>
 
                                 <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
