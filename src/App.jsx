@@ -2620,14 +2620,18 @@ export default function ORPlannerApp() {
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
     >
       <div className="mx-auto max-w-7xl space-y-4">
-        <button
-          type="button"
-          onClick={mobilePullFromCloudOnly}
-          disabled={cloudBusy || !cloudSession?.user?.id}
-          className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-900 px-4 text-sm font-bold text-white shadow-sm disabled:bg-slate-300 md:hidden"
-        >
-          Sync Now
-        </button>
+        <div className="md:hidden">
+          <button
+            type="button"
+            onClick={mobilePullFromCloudOnly}
+            disabled={cloudBusy || !cloudSession?.user?.id}
+            className="flex min-h-[64px] w-full items-center justify-center gap-3 rounded-3xl bg-slate-900 px-5 py-4 text-base font-extrabold text-white shadow-lg ring-1 ring-slate-800 disabled:bg-slate-300 disabled:ring-slate-300"
+          >
+            <RotateCcw className={`h-5 w-5 ${cloudBusy ? "animate-spin" : ""}`} />
+            <span>{cloudBusy ? "Syncing Cloud..." : "Sync Cloud Now"}</span>
+          </button>
+          <div className="mt-1 text-center text-[11px] font-semibold text-slate-500">Pulls latest cloud data to this phone</div>
+        </div>
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3537,7 +3541,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3y · mobile sync button only</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3z · big mobile cloud sync button</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
