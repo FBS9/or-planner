@@ -2601,56 +2601,28 @@ export default function ORPlannerApp() {
     }
   };
 
-  const mobilePullFromCloudOnly = async () => {
-    // Mobile top button should behave as pull-only. It must never save stale
-    // local phone state over newer desktop changes.
-    if (cloudAutoSaveTimerRef.current) {
-      window.clearTimeout(cloudAutoSaveTimerRef.current);
-      cloudAutoSaveTimerRef.current = null;
-    }
-    localDirtyRef.current = false;
-    lastLocalEditAtRef.current = 0;
-    localEditGuardUntilRef.current = 0;
-    await performCloudPull({ silent: false });
-  };
-
-  const showMobileMainSyncBox = !isDesktopLayout && (
-    (typeof navigator !== "undefined" && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent || "")) ||
-    (typeof window !== "undefined" && window.matchMedia?.("(max-width: 767px)")?.matches)
-  );
+  const showPullToRefreshHint = pullRefreshState !== "idle";
+  const pullToRefreshLabel = pullRefreshState === "refreshing" ? "Syncing cloud..." : pullRefreshState === "ready" ? "Release to sync cloud" : "Pull to sync cloud";
 
   return (
     <div
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
+      onTouchStart={handlePullRefreshStart}
+      onTouchMove={handlePullRefreshMove}
+      onTouchEnd={handlePullRefreshEnd}
+      onTouchCancel={() => {
+        pullRefreshArmedRef.current = false;
+        pullRefreshStartYRef.current = null;
+        setPullRefreshState("idle");
+        setPullRefreshDistance(0);
+      }}
     >
       <div className="mx-auto max-w-7xl space-y-4">
-        {showMobileMainSyncBox && (
-        <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-extrabold text-slate-900">Cloud Sync</div>
-              <div className="text-xs font-semibold text-slate-500">Pull latest planner data to this phone</div>
-            </div>
-            {cloudSession ? (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-600">{cloudSyncActivity}</span>
-            ) : (
-              <span className="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-100">Sign in needed</span>
-            )}
+        {showPullToRefreshHint && (
+          <div className="pointer-events-none fixed left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-extrabold text-white shadow-lg ring-1 ring-slate-800">
+            {pullToRefreshLabel}
           </div>
-          <button
-            type="button"
-            onClick={mobilePullFromCloudOnly}
-            disabled={cloudBusy || !cloudSession?.user?.id}
-            className="flex min-h-[68px] w-full items-center justify-center gap-3 rounded-3xl bg-slate-900 px-5 py-4 text-lg font-extrabold text-white shadow-lg ring-1 ring-slate-800 disabled:bg-slate-300 disabled:ring-slate-300"
-          >
-            <RotateCcw className={`h-6 w-6 ${cloudBusy ? "animate-spin" : ""}`} />
-            <span>{cloudBusy ? "Syncing Cloud..." : "Sync Cloud Now"}</span>
-          </button>
-          <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">
-            Pull-only sync. This will not save phone data over desktop changes.
-          </div>
-        </div>
         )}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -3561,7 +3533,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4d · phone-only top sync box</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4e · pull-to-sync no top button</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
