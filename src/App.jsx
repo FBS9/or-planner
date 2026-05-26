@@ -2615,9 +2615,8 @@ export default function ORPlannerApp() {
   };
 
   const showMobileMainSyncBox = !isDesktopLayout && (
-    isMobileLayout ||
-    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
-    (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches)
+    (typeof navigator !== "undefined" && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent || "")) ||
+    (typeof window !== "undefined" && window.matchMedia?.("(max-width: 767px)")?.matches)
   );
 
   return (
@@ -3562,7 +3561,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4c · touch-device top sync box</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4d · phone-only top sync box</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
