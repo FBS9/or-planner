@@ -572,10 +572,12 @@ export default function ORPlannerApp() {
 
   useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+    if (pullRefreshRunningRef.current) return;
     if (!localDirtyRef.current || isApplyingCloudRef.current) return;
 
     if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
     cloudAutoSaveTimerRef.current = window.setTimeout(async () => {
+      if (pullRefreshRunningRef.current) return;
       if (!localDirtyRef.current || isApplyingCloudRef.current) return;
       const snapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
       if (snapshotString === lastSavedSnapshotRef.current) {
@@ -806,6 +808,18 @@ export default function ORPlannerApp() {
     pullRefreshRunningRef.current = true;
     setPullRefreshState("refreshing");
     setPullRefreshDistance(72);
+
+    // Pull-to-refresh must be pull-only. It should never save this device's
+    // local/stale data back to cloud. Clear any pending local autosave and
+    // dirty/guard flags before pulling so a mobile refresh cannot overwrite
+    // newer desktop changes.
+    if (cloudAutoSaveTimerRef.current) {
+      window.clearTimeout(cloudAutoSaveTimerRef.current);
+      cloudAutoSaveTimerRef.current = null;
+    }
+    localDirtyRef.current = false;
+    lastLocalEditAtRef.current = 0;
+    localEditGuardUntilRef.current = 0;
 
     try {
       await performCloudPull({ silent: false });
@@ -3525,7 +3539,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3w · pull-to-sync refresh</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3x · pull-to-sync is pull-only</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
