@@ -2614,13 +2614,20 @@ export default function ORPlannerApp() {
     await performCloudPull({ silent: false });
   };
 
+  const showMobileMainSyncBox = !isDesktopLayout && (
+    isMobileLayout ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+    (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches)
+  );
+
   return (
     <div
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
     >
       <div className="mx-auto max-w-7xl space-y-4">
-        <div className="md:hidden rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+        {showMobileMainSyncBox && (
+        <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-sm font-extrabold text-slate-900">Cloud Sync</div>
@@ -2645,6 +2652,7 @@ export default function ORPlannerApp() {
             Pull-only sync. This will not save phone data over desktop changes.
           </div>
         </div>
+        )}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3554,7 +3562,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4b · big top mobile cloud sync box</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4c · touch-device top sync box</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
