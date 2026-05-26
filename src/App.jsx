@@ -277,6 +277,10 @@ export default function ORPlannerApp() {
   const [showProcedureList, setShowProcedureList] = useState(false);
   const [procedureRosterSpecialty, setProcedureRosterSpecialty] = useState(ALL_PROCEDURE_SPECIALTIES);
   const [procedureExclusions, setProcedureExclusions] = useState([]);
+  const [manualProcedureRosterItems, setManualProcedureRosterItems] = useState([]);
+  const [showAddProcedureRosterModal, setShowAddProcedureRosterModal] = useState(false);
+  const [newProcedureRosterName, setNewProcedureRosterName] = useState("");
+  const [newProcedureRosterSpecialty, setNewProcedureRosterSpecialty] = useState("General Surgeon");
   const [sfSurgeonAliases, setSfSurgeonAliases] = useState({});
   const [sfProcedureAliases, setSfProcedureAliases] = useState({});
   const [sfRosterEditRowIds, setSfRosterEditRowIds] = useState([]);
@@ -366,14 +370,26 @@ export default function ORPlannerApp() {
         if (procedureExclusionKeys.has(normalizeProcedureSearch(procedure))) return;
         const specialty = getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon) || "Unassigned";
         const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
-        const existing = counts.get(key) || { procedure, specialty, count: 0, lastUsed: "" };
+        const existing = counts.get(key) || { procedure, specialty, count: 0, lastUsed: "", manual: false };
         existing.count += 1;
         if (!existing.lastUsed || dateKey > existing.lastUsed) existing.lastUsed = dateKey;
         counts.set(key, existing);
       });
     });
+
+    (manualProcedureRosterItems || []).forEach((item) => {
+      const procedure = (item?.procedure || "").trim();
+      const specialty = (item?.specialty || "Unassigned").trim() || "Unassigned";
+      if (!procedure || procedure.length < 2) return;
+      if (procedureExclusionKeys.has(normalizeProcedureSearch(procedure))) return;
+      const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
+      const existing = counts.get(key) || { procedure, specialty, count: 0, lastUsed: "", manual: true };
+      existing.manual = true;
+      counts.set(key, existing);
+    });
+
     return Array.from(counts.values()).sort((a, b) => a.specialty.localeCompare(b.specialty) || a.procedure.localeCompare(b.procedure));
-  }, [casesByDate, surgeonRosters, procedureExclusionKeys]);
+  }, [casesByDate, surgeonRosters, manualProcedureRosterItems, procedureExclusionKeys]);
 
   const procedureRosterSpecialties = useMemo(() => {
     const specialties = Array.from(new Set(procedureRosterItems.map((item) => item.specialty || "Unassigned"))).sort((a, b) => a.localeCompare(b));
@@ -453,6 +469,7 @@ export default function ORPlannerApp() {
     facilities: sortedFacilities,
     surgeonRosters,
     procedureExclusions,
+    manualProcedureRosterItems,
     sfSurgeonAliases,
     sfProcedureAliases,
     growthSurgeons,
@@ -470,6 +487,7 @@ export default function ORPlannerApp() {
     setRosterFacility((prev) => prev === ALL_SURGEONS || nextFacilities.includes(prev) ? prev : ALL_SURGEONS);
     setGrowthSurgeons(Array.isArray(snapshot.growthSurgeons) ? snapshot.growthSurgeons : []);
     setProcedureExclusions(Array.isArray(snapshot.procedureExclusions) ? snapshot.procedureExclusions : []);
+    setManualProcedureRosterItems(Array.isArray(snapshot.manualProcedureRosterItems) ? snapshot.manualProcedureRosterItems : []);
     setSfSurgeonAliases(snapshot.sfSurgeonAliases && typeof snapshot.sfSurgeonAliases === "object" ? snapshot.sfSurgeonAliases : {});
     setSfProcedureAliases(snapshot.sfProcedureAliases && typeof snapshot.sfProcedureAliases === "object" ? snapshot.sfProcedureAliases : {});
     setWeekStartDay(WEEK_START_OPTIONS.includes(snapshot.weekStartDay) ? snapshot.weekStartDay : "Sunday");
@@ -489,6 +507,7 @@ export default function ORPlannerApp() {
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(parsedFacilities), parsedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
+        setManualProcedureRosterItems(Array.isArray(parsed.manualProcedureRosterItems) ? parsed.manualProcedureRosterItems : []);
         setSfSurgeonAliases(parsed.sfSurgeonAliases && typeof parsed.sfSurgeonAliases === "object" ? parsed.sfSurgeonAliases : {});
         setSfProcedureAliases(parsed.sfProcedureAliases && typeof parsed.sfProcedureAliases === "object" ? parsed.sfProcedureAliases : {});
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
@@ -511,6 +530,7 @@ export default function ORPlannerApp() {
           setSurgeonRosters(ensureRosterShape(old.surgeonRosters || buildEmptyRosters(oldFacilities), oldFacilities));
           setGrowthSurgeons(Array.isArray(old.growthSurgeons) ? old.growthSurgeons : []);
           setProcedureExclusions(Array.isArray(old.procedureExclusions) ? old.procedureExclusions : []);
+          setManualProcedureRosterItems(Array.isArray(old.manualProcedureRosterItems) ? old.manualProcedureRosterItems : []);
           setSfSurgeonAliases(old.sfSurgeonAliases && typeof old.sfSurgeonAliases === "object" ? old.sfSurgeonAliases : {});
           setSfProcedureAliases(old.sfProcedureAliases && typeof old.sfProcedureAliases === "object" ? old.sfProcedureAliases : {});
           setWeekStartDay(migratedWeekStartDay);
@@ -526,7 +546,7 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(getPlannerSnapshot()));
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded]);
+  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
     if (!plannerLoaded) return;
@@ -580,7 +600,7 @@ export default function ORPlannerApp() {
         localEditGuardUntilRef.current = Math.max(localEditGuardUntilRef.current, Date.now() + 3500);
       }
     }
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
@@ -604,7 +624,7 @@ export default function ORPlannerApp() {
     return () => {
       if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -720,6 +740,9 @@ export default function ORPlannerApp() {
     facilities: sortStringArray(snapshot.facilities),
     surgeonRosters: normalizeSurgeonRostersForCloudCompare(snapshot.surgeonRosters || {}),
     procedureExclusions: sortStringArray(snapshot.procedureExclusions),
+    manualProcedureRosterItems: (Array.isArray(snapshot.manualProcedureRosterItems) ? snapshot.manualProcedureRosterItems : [])
+      .map((item) => ({ procedure: item?.procedure || "", specialty: item?.specialty || "Unassigned" }))
+      .sort((a, b) => `${a.specialty}|${a.procedure}`.localeCompare(`${b.specialty}|${b.procedure}`)),
     sfSurgeonAliases: normalizeAliasMapForCloudCompare(snapshot.sfSurgeonAliases || {}),
     sfProcedureAliases: normalizeAliasMapForCloudCompare(snapshot.sfProcedureAliases || {}),
     growthSurgeons: sortStringArray(snapshot.growthSurgeons),
@@ -1045,7 +1068,7 @@ export default function ORPlannerApp() {
       window.removeEventListener("pointerdown", kickMobileCloudSync);
       document.removeEventListener("visibilitychange", kickMobileCloudSync);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -1408,6 +1431,34 @@ export default function ORPlannerApp() {
     });
   };
 
+  const openAddProcedureRosterModal = () => {
+    setNewProcedureRosterName("");
+    setNewProcedureRosterSpecialty(procedureRosterSpecialty === ALL_PROCEDURE_SPECIALTIES ? "General Surgeon" : procedureRosterSpecialty);
+    setShowAddProcedureRosterModal(true);
+  };
+
+  const closeAddProcedureRosterModal = () => {
+    setShowAddProcedureRosterModal(false);
+    setNewProcedureRosterName("");
+  };
+
+  const addManualProcedureToRoster = () => {
+    const procedure = newProcedureRosterName.trim();
+    const specialty = (newProcedureRosterSpecialty || "Unassigned").trim() || "Unassigned";
+    if (!procedure) return;
+    const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
+    const existsInRoster = procedureRosterItems.some((item) => procedureRosterItemKey(item) === key);
+    if (!existsInRoster) {
+      setManualProcedureRosterItems((prev) => {
+        const existing = new Set((prev || []).map((item) => `${normalizeProcedureSearch(item?.specialty || "Unassigned")}::${normalizeProcedureSearch(item?.procedure || "")}`));
+        if (existing.has(key)) return prev;
+        return [...(prev || []), { procedure, specialty }];
+      });
+    }
+    setProcedureExclusions((prev) => (prev || []).filter((entry) => normalizeProcedureSearch(typeof entry === "string" ? entry : entry?.procedure) !== normalizeProcedureSearch(procedure)));
+    closeAddProcedureRosterModal();
+  };
+
   const procedureRosterItemKey = (item) => `${normalizeProcedureSearch(item?.specialty || "Unassigned")}::${normalizeProcedureSearch(item?.procedure || "")}`;
 
   const startEditingProcedureFromRoster = (item) => {
@@ -1447,6 +1498,13 @@ export default function ORPlannerApp() {
       return next;
     });
 
+    setManualProcedureRosterItems((prev) => (prev || []).map((entry) => {
+      const entryProcedure = (entry?.procedure || "").trim();
+      const entrySpecialty = entry?.specialty || "Unassigned";
+      if (normalizeProcedureSearch(entryProcedure) !== normalizeProcedureSearch(oldProcedure)) return entry;
+      if (specialty !== ALL_PROCEDURE_SPECIALTIES && normalizeProcedureSearch(entrySpecialty) !== normalizeProcedureSearch(specialty)) return entry;
+      return { ...entry, procedure: newProcedure };
+    }));
     setProcedureExclusions((prev) => (prev || []).filter((entry) => normalizeProcedureSearch(typeof entry === "string" ? entry : entry?.procedure) !== normalizeProcedureSearch(newProcedure)));
     cancelEditingProcedureFromRoster();
   };
@@ -1567,6 +1625,7 @@ export default function ORPlannerApp() {
         setSurgeonRosters(ensureRosterShape(parsed.surgeonRosters || buildEmptyRosters(importedFacilities), importedFacilities));
         setGrowthSurgeons(Array.isArray(parsed.growthSurgeons) ? parsed.growthSurgeons : []);
         setProcedureExclusions(Array.isArray(parsed.procedureExclusions) ? parsed.procedureExclusions : []);
+        setManualProcedureRosterItems(Array.isArray(parsed.manualProcedureRosterItems) ? parsed.manualProcedureRosterItems : []);
         setSfSurgeonAliases(parsed.sfSurgeonAliases && typeof parsed.sfSurgeonAliases === "object" ? parsed.sfSurgeonAliases : {});
         setSfProcedureAliases(parsed.sfProcedureAliases && typeof parsed.sfProcedureAliases === "object" ? parsed.sfProcedureAliases : {});
         setWeekStartDay(WEEK_START_OPTIONS.includes(parsed.weekStartDay) ? parsed.weekStartDay : "Sunday");
@@ -1579,7 +1638,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -3192,7 +3251,17 @@ export default function ORPlannerApp() {
                 {showProcedureList && (
                   <div className="mt-3 w-full min-w-0 overflow-hidden rounded-2xl bg-slate-100 p-2">
                     {selectedProcedureRosterItems.length === 0 ? (
-                      <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No saved procedures found for this filter.</div>
+                      <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        <div className="rounded-xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">No saved procedures found for this filter.</div>
+                        <button
+                          type="button"
+                          onClick={openAddProcedureRosterModal}
+                          className="flex w-full min-w-0 max-w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-bold text-blue-700 ring-1 ring-blue-100 hover:bg-blue-50"
+                          aria-label="Add procedure to procedure roster"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
                     ) : (
                       <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                         {selectedProcedureRosterItems.map((item) => {
@@ -3219,7 +3288,7 @@ export default function ORPlannerApp() {
                                 <>
                                   <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={item.procedure}>{item.procedure}</span>
                                   <span className="hidden max-w-[35%] shrink-0 truncate rounded-xl bg-slate-50 px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200 sm:inline-block" title={item.specialty}>{item.specialty}</span>
-                                  <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count}x</span>
+                                  <span className="shrink-0 rounded-xl bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{item.count ? `${item.count}x` : "Manual"}</span>
                                   <button onClick={() => startEditingProcedureFromRoster(item)} className="shrink-0 rounded-xl bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-100 hover:bg-blue-100">Edit</button>
                                   <button onClick={() => removeProcedureFromRoster(item.procedure)} className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Remove ${item.procedure}`}><Trash2 className="h-3.5 w-3.5" /></button>
                                 </>
@@ -3227,6 +3296,14 @@ export default function ORPlannerApp() {
                             </div>
                           );
                         })}
+                        <button
+                          type="button"
+                          onClick={openAddProcedureRosterModal}
+                          className="flex w-full min-w-0 max-w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-white px-3 py-2 text-sm font-bold text-blue-700 ring-1 ring-blue-100 hover:bg-blue-50"
+                          aria-label="Add procedure to procedure roster"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
                       </div>
                     )}
                   </div>
@@ -3235,6 +3312,45 @@ export default function ORPlannerApp() {
             )}
           </CardContent>
         </Card>
+
+
+
+        {showAddProcedureRosterModal && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="w-full max-w-lg rounded-3xl bg-white p-5 shadow-2xl ring-1 ring-slate-200">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Add Procedure to Roster</h3>
+                  <p className="mt-1 text-sm text-slate-500">Add a saved procedure name for search and Salesforce matching. This does not create a case.</p>
+                </div>
+                <button onClick={closeAddProcedureRosterModal} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-200">Close</button>
+              </div>
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Procedure name
+                  <input
+                    value={newProcedureRosterName}
+                    onChange={(e) => setNewProcedureRosterName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addManualProcedureToRoster(); if (e.key === "Escape") closeAddProcedureRosterModal(); }}
+                    placeholder="Example: Paraesophageal"
+                    className="input normal-case tracking-normal"
+                    autoFocus
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Specialty
+                  <select value={newProcedureRosterSpecialty} onChange={(e) => setNewProcedureRosterSpecialty(e.target.value)} className="input normal-case tracking-normal">
+                    {Array.from(new Set(["General Surgeon", "Gynecology", "Urology", "Colorectal", "Bariatrics", procedureRosterSpecialty !== ALL_PROCEDURE_SPECIALTIES ? procedureRosterSpecialty : "", ...procedureRosterSpecialties.filter((item) => item !== ALL_PROCEDURE_SPECIALTIES)])).filter(Boolean).map((specialty) => <option key={specialty}>{specialty}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button onClick={closeAddProcedureRosterModal} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-200">Cancel</button>
+                <button onClick={addManualProcedureToRoster} disabled={!newProcedureRosterName.trim()} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300">Add Procedure</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <Card className="rounded-3xl shadow-sm">
@@ -3702,7 +3818,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4i · unique Salesforce match consumption</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4j · add procedure roster plus</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
