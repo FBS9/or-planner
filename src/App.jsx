@@ -291,6 +291,11 @@ export default function ORPlannerApp() {
   const [showCloudPanel, setShowCloudPanel] = useState(false);
   const [autoCloudReady, setAutoCloudReady] = useState(false);
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
+  const [pullRefreshState, setPullRefreshState] = useState("idle");
+  const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
+  const pullRefreshStartYRef = useRef(null);
+  const pullRefreshArmedRef = useRef(false);
+  const pullRefreshRunningRef = useRef(false);
   const lastSavedSnapshotRef = useRef("");
   const latestLocalCloudSnapshotRef = useRef("");
   const lastCloudUpdatedAtRef = useRef("");
@@ -788,6 +793,71 @@ export default function ORPlannerApp() {
   const saveToCloud = async () => performCloudSave({ silent: false });
 
   const pullFromCloud = async () => performCloudPull({ silent: false });
+
+  const runPullToRefreshSync = async () => {
+    if (pullRefreshRunningRef.current) return;
+    if (!cloudSession?.user?.id) {
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+      setCloudStatus("Sign in to Cloud Sync before pull-to-refresh can sync.");
+      return;
+    }
+
+    pullRefreshRunningRef.current = true;
+    setPullRefreshState("refreshing");
+    setPullRefreshDistance(72);
+
+    try {
+      await performCloudPull({ silent: false });
+    } finally {
+      window.setTimeout(() => {
+        pullRefreshRunningRef.current = false;
+        setPullRefreshState("idle");
+        setPullRefreshDistance(0);
+      }, 450);
+    }
+  };
+
+  const handlePullRefreshStart = (event) => {
+    if (event.touches?.length !== 1) return;
+    if (window.scrollY > 2) return;
+    if (pullRefreshRunningRef.current) return;
+    pullRefreshStartYRef.current = event.touches[0].clientY;
+    pullRefreshArmedRef.current = true;
+    setPullRefreshState("pulling");
+  };
+
+  const handlePullRefreshMove = (event) => {
+    if (!pullRefreshArmedRef.current || pullRefreshStartYRef.current == null) return;
+    if (window.scrollY > 2) {
+      pullRefreshArmedRef.current = false;
+      pullRefreshStartYRef.current = null;
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+      return;
+    }
+
+    const distance = Math.max(0, event.touches[0].clientY - pullRefreshStartYRef.current);
+    if (distance < 6) return;
+
+    const dampedDistance = Math.min(96, Math.round(distance * 0.45));
+    setPullRefreshDistance(dampedDistance);
+    setPullRefreshState(distance >= 110 ? "ready" : "pulling");
+  };
+
+  const handlePullRefreshEnd = () => {
+    if (!pullRefreshArmedRef.current) return;
+    const shouldRefresh = pullRefreshState === "ready" || pullRefreshDistance >= 58;
+    pullRefreshArmedRef.current = false;
+    pullRefreshStartYRef.current = null;
+
+    if (shouldRefresh) {
+      runPullToRefreshSync();
+    } else {
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+    }
+  };
 
   useEffect(() => {
     if (!plannerLoaded || !cloudSession?.user?.id) {
@@ -2517,9 +2587,35 @@ export default function ORPlannerApp() {
     }
   };
 
+  const pullRefreshLabel = pullRefreshState === "refreshing"
+    ? "Syncing..."
+    : pullRefreshState === "ready"
+      ? "Release to sync"
+      : pullRefreshState === "pulling"
+        ? "Pull down to sync"
+        : "";
+
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
-      <div className="mx-auto max-w-7xl space-y-4">
+    <div
+      className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
+      style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
+      onTouchStart={handlePullRefreshStart}
+      onTouchMove={handlePullRefreshMove}
+      onTouchEnd={handlePullRefreshEnd}
+      onTouchCancel={handlePullRefreshEnd}
+    >
+      {pullRefreshState !== "idle" && (
+        <div
+          className="fixed left-1/2 top-2 z-[80] -translate-x-1/2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-lg ring-1 ring-slate-200 transition-all"
+          style={{ transform: `translate(-50%, ${Math.max(0, pullRefreshDistance - 48)}px)` }}
+        >
+          {pullRefreshLabel}
+        </div>
+      )}
+      <div
+        className="mx-auto max-w-7xl space-y-4 transition-transform"
+        style={{ transform: pullRefreshState !== "idle" ? `translateY(${Math.min(54, pullRefreshDistance)}px)` : "translateY(0px)" }}
+      >
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3429,7 +3525,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3v · protected local edit sync</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3w · pull-to-sync refresh</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
