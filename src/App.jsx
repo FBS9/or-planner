@@ -279,6 +279,7 @@ export default function ORPlannerApp() {
   const [procedureExclusions, setProcedureExclusions] = useState([]);
   const [sfSurgeonAliases, setSfSurgeonAliases] = useState({});
   const [sfProcedureAliases, setSfProcedureAliases] = useState({});
+  const [sfRosterEditRowIds, setSfRosterEditRowIds] = useState([]);
   const [editingProcedureRosterKey, setEditingProcedureRosterKey] = useState("");
   const [editingProcedureName, setEditingProcedureName] = useState("");
   const [growthSurgeons, setGrowthSurgeons] = useState([]);
@@ -2478,6 +2479,10 @@ export default function ORPlannerApp() {
     setSfApplySummary("");
   };
 
+  const toggleSfRosterEditRow = (rowId) => {
+    setSfRosterEditRowIds((prev) => prev.includes(rowId) ? prev.filter((id) => id !== rowId) : [...prev, rowId]);
+  };
+
   const getSfPlannerCaseOptions = (sfCase) => {
     const mode = sfCase.action === "markReconciled" ? "reconcile" : "normal";
     const matches = sfGetPlannerMatches(sfCase, mode);
@@ -3691,7 +3696,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4g · SF roster alias matching</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4h · edit-only roster alias controls</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3806,6 +3811,9 @@ export default function ORPlannerApp() {
                         const procedureRosterOptions = sfProcedureRosterOptionsForRow(item);
                         const selectedSurgeonIsInRoster = surgeonRosterOptions.some((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(item.surgeon || ""));
                         const selectedProcedureIsInRoster = procedureRosterOptions.some((procedureItem) => normalizeProcedureSearch(procedureItem.procedure) === normalizeProcedureSearch(item.procedure || ""));
+                        const needsMissingSurgeonPrompt = Boolean(item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon));
+                        const rosterEditOpen = needsMissingSurgeonPrompt || sfRosterEditRowIds.includes(item.id);
+                        const canEditRosterMapping = Boolean((item.facility && item.surgeon && surgeonRosterOptions.length > 0) || (item.procedure && procedureRosterOptions.length > 0));
                         return (
                         <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3851,6 +3859,18 @@ export default function ORPlannerApp() {
                             )}
                           </div>
 
+                          {canEditRosterMapping && !needsMissingSurgeonPrompt && (
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => toggleSfRosterEditRow(item.id)}
+                                className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
+                              >
+                                {rosterEditOpen ? "Done editing surgeon/procedure" : "Edit surgeon/procedure match"}
+                              </button>
+                            </div>
+                          )}
+
                           <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 md:grid-cols-2">
                             {(item.facilityOptions?.length > 1 || !item.facility) && (
                               <label className="block">
@@ -3868,7 +3888,7 @@ export default function ORPlannerApp() {
                               </label>
                             )}
 
-                            {item.facility && item.surgeon && surgeonRosterOptions.length > 0 && (
+                            {rosterEditOpen && item.facility && item.surgeon && surgeonRosterOptions.length > 0 && (
                               <label className="block">
                                 <span className="mb-1 block text-xs font-bold text-slate-500">Use saved surgeon</span>
                                 <select
@@ -3887,7 +3907,7 @@ export default function ORPlannerApp() {
                               </label>
                             )}
 
-                            {item.procedure && procedureRosterOptions.length > 0 && (
+                            {rosterEditOpen && item.procedure && procedureRosterOptions.length > 0 && (
                               <label className="block">
                                 <span className="mb-1 block text-xs font-bold text-slate-500">Use saved procedure</span>
                                 <select
@@ -3918,7 +3938,7 @@ export default function ORPlannerApp() {
                               </div>
                             )}
 
-                            {item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon) && (
+                            {needsMissingSurgeonPrompt && (
                               <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-100 md:col-span-2">
                                 <div className="font-bold">Surgeon not in this facility roster</div>
                                 <div className="mt-1">
