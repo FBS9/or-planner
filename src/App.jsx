@@ -298,6 +298,7 @@ export default function ORPlannerApp() {
   const lastAutoCloudPullAtRef = useRef(0);
   const autoCloudSyncInFlightRef = useRef(false);
   const lastLocalEditAtRef = useRef(0);
+  const localEditGuardUntilRef = useRef(0);
   const localDirtyRef = useRef(false);
   const lastCloudCheckAtRef = useRef(0);
   const cloudAutoSaveTimerRef = useRef(null);
@@ -512,6 +513,37 @@ export default function ORPlannerApp() {
 
   useEffect(() => {
     if (!plannerLoaded) return;
+
+    const markLocalEditGuard = (event) => {
+      const target = event?.target;
+      const tagName = String(target?.tagName || "").toLowerCase();
+      const isEditable =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        tagName === "button" ||
+        Boolean(target?.closest?.("button,input,textarea,select,[role='button'],[role='checkbox']"));
+
+      if (isEditable) {
+        localEditGuardUntilRef.current = Date.now() + 3500;
+      }
+    };
+
+    window.addEventListener("pointerdown", markLocalEditGuard, true);
+    window.addEventListener("keydown", markLocalEditGuard, true);
+    window.addEventListener("change", markLocalEditGuard, true);
+    window.addEventListener("input", markLocalEditGuard, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", markLocalEditGuard, true);
+      window.removeEventListener("keydown", markLocalEditGuard, true);
+      window.removeEventListener("change", markLocalEditGuard, true);
+      window.removeEventListener("input", markLocalEditGuard, true);
+    };
+  }, [plannerLoaded]);
+
+  useEffect(() => {
+    if (!plannerLoaded) return;
     const nextSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
 
     // Only mark this device dirty when the actual planner data changed locally.
@@ -528,6 +560,7 @@ export default function ORPlannerApp() {
       if (!isApplyingCloudRef.current && autoCloudReady && cloudSession?.user?.id) {
         localDirtyRef.current = true;
         lastLocalEditAtRef.current = Date.now();
+        localEditGuardUntilRef.current = Math.max(localEditGuardUntilRef.current, Date.now() + 3500);
       }
     }
   }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
@@ -782,7 +815,7 @@ export default function ORPlannerApp() {
           const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
           const incomingSnapshotString = snapshotToCloudComparableString(incoming.planner_data);
           const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-          const localEditIsFresh = localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000;
+          const localEditIsFresh = (localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000) || Date.now() < localEditGuardUntilRef.current;
 
           // Do not rely on device timestamps here. Phones/desktops can have slightly
           // different clocks, which can make a newer desktop save look "older" to the
@@ -823,7 +856,7 @@ export default function ORPlannerApp() {
       try {
         const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
         const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
-        const localEditIsFresh = localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000;
+        const localEditIsFresh = (localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000) || Date.now() < localEditGuardUntilRef.current;
 
         setCloudSyncActivity("Checking cloud...");
         const { data, error } = await getCloudRecord();
@@ -3396,7 +3429,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3u · pull-only sync checker</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3v · protected local edit sync</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
