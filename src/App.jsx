@@ -2601,35 +2601,33 @@ export default function ORPlannerApp() {
     }
   };
 
-  const pullRefreshLabel = pullRefreshState === "refreshing"
-    ? "Syncing..."
-    : pullRefreshState === "ready"
-      ? "Release to sync"
-      : pullRefreshState === "pulling"
-        ? "Pull down to sync"
-        : "";
+  const mobilePullFromCloudOnly = async () => {
+    // Mobile top button should behave as pull-only. It must never save stale
+    // local phone state over newer desktop changes.
+    if (cloudAutoSaveTimerRef.current) {
+      window.clearTimeout(cloudAutoSaveTimerRef.current);
+      cloudAutoSaveTimerRef.current = null;
+    }
+    localDirtyRef.current = false;
+    lastLocalEditAtRef.current = 0;
+    localEditGuardUntilRef.current = 0;
+    await performCloudPull({ silent: false });
+  };
 
   return (
     <div
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
-      onTouchStart={handlePullRefreshStart}
-      onTouchMove={handlePullRefreshMove}
-      onTouchEnd={handlePullRefreshEnd}
-      onTouchCancel={handlePullRefreshEnd}
     >
-      {pullRefreshState !== "idle" && (
-        <div
-          className="fixed left-1/2 top-2 z-[80] -translate-x-1/2 rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-lg ring-1 ring-slate-200 transition-all"
-          style={{ transform: `translate(-50%, ${Math.max(0, pullRefreshDistance - 48)}px)` }}
+      <div className="mx-auto max-w-7xl space-y-4">
+        <button
+          type="button"
+          onClick={mobilePullFromCloudOnly}
+          disabled={cloudBusy || !cloudSession?.user?.id}
+          className="flex h-12 w-full items-center justify-center rounded-2xl bg-slate-900 px-4 text-sm font-bold text-white shadow-sm disabled:bg-slate-300 md:hidden"
         >
-          {pullRefreshLabel}
-        </div>
-      )}
-      <div
-        className="mx-auto max-w-7xl space-y-4 transition-transform"
-        style={{ transform: pullRefreshState !== "idle" ? `translateY(${Math.min(54, pullRefreshDistance)}px)` : "translateY(0px)" }}
-      >
+          Sync Now
+        </button>
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3539,7 +3537,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3x · pull-to-sync is pull-only</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3y · mobile sync button only</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
