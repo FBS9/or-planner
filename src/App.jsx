@@ -291,8 +291,22 @@ export default function ORPlannerApp() {
   const [showCloudPanel, setShowCloudPanel] = useState(false);
   const [autoCloudReady, setAutoCloudReady] = useState(false);
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
+  const [pullRefreshState, setPullRefreshState] = useState("idle");
+  const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
+  const pullRefreshStartYRef = useRef(null);
+  const pullRefreshArmedRef = useRef(false);
+  const pullRefreshRunningRef = useRef(false);
   const lastSavedSnapshotRef = useRef("");
+  const latestLocalCloudSnapshotRef = useRef("");
+  const lastCloudUpdatedAtRef = useRef("");
   const isApplyingCloudRef = useRef(false);
+  const lastAutoCloudPullAtRef = useRef(0);
+  const autoCloudSyncInFlightRef = useRef(false);
+  const lastLocalEditAtRef = useRef(0);
+  const localEditGuardUntilRef = useRef(0);
+  const localDirtyRef = useRef(false);
+  const lastCloudCheckAtRef = useRef(0);
+  const cloudAutoSaveTimerRef = useRef(null);
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
@@ -503,6 +517,84 @@ export default function ORPlannerApp() {
   }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
+    if (!plannerLoaded) return;
+
+    const markLocalEditGuard = (event) => {
+      const target = event?.target;
+      const tagName = String(target?.tagName || "").toLowerCase();
+      const isEditable =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        tagName === "button" ||
+        Boolean(target?.closest?.("button,input,textarea,select,[role='button'],[role='checkbox']"));
+
+      if (isEditable) {
+        localEditGuardUntilRef.current = Date.now() + 3500;
+      }
+    };
+
+    window.addEventListener("pointerdown", markLocalEditGuard, true);
+    window.addEventListener("keydown", markLocalEditGuard, true);
+    window.addEventListener("change", markLocalEditGuard, true);
+    window.addEventListener("input", markLocalEditGuard, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", markLocalEditGuard, true);
+      window.removeEventListener("keydown", markLocalEditGuard, true);
+      window.removeEventListener("change", markLocalEditGuard, true);
+      window.removeEventListener("input", markLocalEditGuard, true);
+    };
+  }, [plannerLoaded]);
+
+  useEffect(() => {
+    if (!plannerLoaded) return;
+    const nextSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+
+    // Only mark this device dirty when the actual planner data changed locally.
+    // Do NOT mark dirty just because the user tapped/scrolled/clicked somewhere.
+    // That was allowing an idle/stale phone to keep pushing old checkbox states
+    // back over newer desktop changes.
+    if (!latestLocalCloudSnapshotRef.current) {
+      latestLocalCloudSnapshotRef.current = nextSnapshotString;
+      return;
+    }
+
+    if (nextSnapshotString !== latestLocalCloudSnapshotRef.current) {
+      latestLocalCloudSnapshotRef.current = nextSnapshotString;
+      if (!isApplyingCloudRef.current && autoCloudReady && cloudSession?.user?.id) {
+        localDirtyRef.current = true;
+        lastLocalEditAtRef.current = Date.now();
+        localEditGuardUntilRef.current = Math.max(localEditGuardUntilRef.current, Date.now() + 3500);
+      }
+    }
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+
+  useEffect(() => {
+    if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+    if (pullRefreshRunningRef.current) return;
+    if (!localDirtyRef.current || isApplyingCloudRef.current) return;
+
+    if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
+    cloudAutoSaveTimerRef.current = window.setTimeout(async () => {
+      if (pullRefreshRunningRef.current) return;
+      if (!localDirtyRef.current || isApplyingCloudRef.current) return;
+      const snapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+      if (snapshotString === lastSavedSnapshotRef.current) {
+        localDirtyRef.current = false;
+        setCloudSyncActivity("Synced");
+        return;
+      }
+      setCloudSyncActivity("Auto-saving...");
+      await performCloudSave({ silent: true });
+    }, 900);
+
+    return () => {
+      if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
+    };
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+
+  useEffect(() => {
     if (!supabase) return;
     let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
@@ -546,10 +638,87 @@ export default function ORPlannerApp() {
     setCloudSession(null);
     setAutoCloudReady(false);
     lastSavedSnapshotRef.current = "";
+    latestLocalCloudSnapshotRef.current = "";
+    lastCloudUpdatedAtRef.current = "";
+    localDirtyRef.current = false;
     setCloudStatus("Signed out of cloud sync.");
   };
 
   const snapshotToString = (snapshot) => JSON.stringify(snapshot);
+
+  // Cloud sync should compare real planner data, not UI-only state like the
+  // currently selected date. Mobile and desktop can legitimately be viewing
+  // different days, and that should not make one device think it has unsaved
+  // local changes and overwrite the other device's newer cloud data.
+  const sortStringArray = (values = []) => Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
+
+  const normalizeSurgeonRostersForCloudCompare = (rosters = {}) => {
+    const normalized = {};
+    Object.keys(rosters || {}).sort((a, b) => a.localeCompare(b)).forEach((facility) => {
+      normalized[facility] = (Array.isArray(rosters[facility]) ? rosters[facility] : [])
+        .map((surgeon) => ({
+          name: surgeon?.name || "",
+          subspecialty: surgeon?.subspecialty || "",
+        }))
+        .filter((surgeon) => surgeon.name)
+        .sort((a, b) => `${a.name}|${a.subspecialty}`.localeCompare(`${b.name}|${b.subspecialty}`));
+    });
+    return normalized;
+  };
+
+  const normalizeCasesByDateForCloudCompare = (cases = {}) => {
+    const normalized = {};
+    Object.keys(cases || {}).sort((a, b) => a.localeCompare(b)).forEach((dateKey) => {
+      normalized[dateKey] = (Array.isArray(cases[dateKey]) ? cases[dateKey] : [])
+        .map((item) => ({
+          id: item?.id || "",
+          date: item?.date || dateKey,
+          facility: item?.facility || "",
+          surgeon: item?.surgeon || "",
+          procedure: item?.procedure || "",
+          notes: item?.notes || "",
+          fastTracking: Boolean(item?.fastTracking),
+          reconciled: Boolean(item?.reconciled),
+          growth: Boolean(item?.growth),
+        }))
+        .sort((a, b) => `${a.date}|${a.facility}|${a.surgeon}|${a.procedure}|${a.id}`.localeCompare(`${b.date}|${b.facility}|${b.surgeon}|${b.procedure}|${b.id}`));
+    });
+    return normalized;
+  };
+
+  const snapshotToCloudComparableString = (snapshot = {}) => JSON.stringify({
+    plannerTitle: snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner",
+    casesByDate: normalizeCasesByDateForCloudCompare(snapshot.casesByDate || {}),
+    facilities: sortStringArray(snapshot.facilities),
+    surgeonRosters: normalizeSurgeonRostersForCloudCompare(snapshot.surgeonRosters || {}),
+    procedureExclusions: sortStringArray(snapshot.procedureExclusions),
+    growthSurgeons: sortStringArray(snapshot.growthSurgeons),
+    weekStartDay: snapshot.weekStartDay || "Sunday",
+  });
+
+  const getCloudRecord = async () => {
+    if (!supabase || !cloudSession?.user?.id) return { data: null, error: null };
+    return supabase
+      .from("or_planner_sync")
+      .select("planner_data, updated_at")
+      .eq("user_id", cloudSession.user.id)
+      .maybeSingle();
+  };
+
+  const applyCloudPlannerData = (plannerData, updatedAt, activityLabel = "Synced") => {
+    isApplyingCloudRef.current = true;
+    applyPlannerSnapshot(plannerData);
+    const pulledSnapshotString = snapshotToCloudComparableString(plannerData);
+    lastSavedSnapshotRef.current = pulledSnapshotString;
+    latestLocalCloudSnapshotRef.current = pulledSnapshotString;
+    lastCloudUpdatedAtRef.current = updatedAt || new Date().toISOString();
+    localDirtyRef.current = false;
+    window.setTimeout(() => {
+      isApplyingCloudRef.current = false;
+      setAutoCloudReady(true);
+    }, 400);
+    setCloudSyncActivity(activityLabel);
+  };
 
   const performCloudSave = async ({ silent = false } = {}) => {
     if (!supabase) {
@@ -562,15 +731,16 @@ export default function ORPlannerApp() {
     }
 
     const snapshot = getPlannerSnapshot();
-    const snapshotString = snapshotToString(snapshot);
+    const snapshotString = snapshotToCloudComparableString(snapshot);
     if (silent && snapshotString === lastSavedSnapshotRef.current) return;
 
     if (!silent) setCloudBusy(true);
     setCloudSyncActivity("Saving...");
+    const savedAt = new Date().toISOString();
     const { error } = await supabase.from("or_planner_sync").upsert({
       user_id: cloudSession.user.id,
       planner_data: snapshot,
-      updated_at: new Date().toISOString(),
+      updated_at: savedAt,
     }, { onConflict: "user_id" });
     if (!silent) setCloudBusy(false);
 
@@ -581,6 +751,9 @@ export default function ORPlannerApp() {
     }
 
     lastSavedSnapshotRef.current = snapshotString;
+    latestLocalCloudSnapshotRef.current = snapshotString;
+    lastCloudUpdatedAtRef.current = savedAt;
+    localDirtyRef.current = false;
     const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
     setCloudSyncActivity("Saved");
     setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
@@ -598,11 +771,7 @@ export default function ORPlannerApp() {
 
     if (!silent) setCloudBusy(true);
     setCloudSyncActivity("Pulling...");
-    const { data, error } = await supabase
-      .from("or_planner_sync")
-      .select("planner_data, updated_at")
-      .eq("user_id", cloudSession.user.id)
-      .maybeSingle();
+    const { data, error } = await getCloudRecord();
     if (!silent) setCloudBusy(false);
 
     if (error) {
@@ -619,15 +788,7 @@ export default function ORPlannerApp() {
       return;
     }
 
-    isApplyingCloudRef.current = true;
-    applyPlannerSnapshot(data.planner_data);
-    lastSavedSnapshotRef.current = snapshotToString(data.planner_data);
-    window.setTimeout(() => {
-      isApplyingCloudRef.current = false;
-      setAutoCloudReady(true);
-    }, 0);
-
-    setCloudSyncActivity("Synced");
+    applyCloudPlannerData(data.planner_data, data.updated_at, "Synced");
     setCloudStatus(`Auto-pulled cloud data from ${data.updated_at ? new Date(data.updated_at).toLocaleString() : "cloud"}.`);
   };
 
@@ -635,30 +796,226 @@ export default function ORPlannerApp() {
 
   const pullFromCloud = async () => performCloudPull({ silent: false });
 
+  const runPullToRefreshSync = async () => {
+    if (pullRefreshRunningRef.current) return;
+    if (!cloudSession?.user?.id) {
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+      setCloudStatus("Sign in to Cloud Sync before pull-to-refresh can sync.");
+      return;
+    }
+
+    pullRefreshRunningRef.current = true;
+    setPullRefreshState("refreshing");
+    setPullRefreshDistance(72);
+
+    // Pull-to-refresh must be pull-only. It should never save this device's
+    // local/stale data back to cloud. Clear any pending local autosave and
+    // dirty/guard flags before pulling so a mobile refresh cannot overwrite
+    // newer desktop changes.
+    if (cloudAutoSaveTimerRef.current) {
+      window.clearTimeout(cloudAutoSaveTimerRef.current);
+      cloudAutoSaveTimerRef.current = null;
+    }
+    localDirtyRef.current = false;
+    lastLocalEditAtRef.current = 0;
+    localEditGuardUntilRef.current = 0;
+
+    try {
+      await performCloudPull({ silent: false });
+    } finally {
+      window.setTimeout(() => {
+        pullRefreshRunningRef.current = false;
+        setPullRefreshState("idle");
+        setPullRefreshDistance(0);
+      }, 450);
+    }
+  };
+
+  const handlePullRefreshStart = (event) => {
+    if (event.touches?.length !== 1) return;
+    if (window.scrollY > 2) return;
+    if (pullRefreshRunningRef.current) return;
+    pullRefreshStartYRef.current = event.touches[0].clientY;
+    pullRefreshArmedRef.current = true;
+    setPullRefreshState("pulling");
+  };
+
+  const handlePullRefreshMove = (event) => {
+    if (!pullRefreshArmedRef.current || pullRefreshStartYRef.current == null) return;
+    if (window.scrollY > 2) {
+      pullRefreshArmedRef.current = false;
+      pullRefreshStartYRef.current = null;
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+      return;
+    }
+
+    const distance = Math.max(0, event.touches[0].clientY - pullRefreshStartYRef.current);
+    if (distance < 6) return;
+
+    const dampedDistance = Math.min(96, Math.round(distance * 0.45));
+    setPullRefreshDistance(dampedDistance);
+    setPullRefreshState(distance >= 110 ? "ready" : "pulling");
+  };
+
+  const handlePullRefreshEnd = () => {
+    if (!pullRefreshArmedRef.current) return;
+    const shouldRefresh = pullRefreshState === "ready" || pullRefreshDistance >= 58;
+    pullRefreshArmedRef.current = false;
+    pullRefreshStartYRef.current = null;
+
+    if (shouldRefresh) {
+      runPullToRefreshSync();
+    } else {
+      setPullRefreshState("idle");
+      setPullRefreshDistance(0);
+    }
+  };
+
   useEffect(() => {
     if (!plannerLoaded || !cloudSession?.user?.id) {
       setAutoCloudReady(false);
       return;
     }
     setAutoCloudReady(false);
+    lastAutoCloudPullAtRef.current = Date.now();
     performCloudPull({ silent: true });
   }, [plannerLoaded, cloudSession?.user?.id]);
 
   useEffect(() => {
+    if (!supabase || !plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
+
+    const userId = cloudSession.user.id;
+    const channel = supabase
+      .channel(`or-planner-sync-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "or_planner_sync", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const incoming = payload?.new;
+          if (!incoming?.planner_data) return;
+
+          const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+          const incomingSnapshotString = snapshotToCloudComparableString(incoming.planner_data);
+          const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
+          const localEditIsFresh = (localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000) || Date.now() < localEditGuardUntilRef.current;
+
+          // Do not rely on device timestamps here. Phones/desktops can have slightly
+          // different clocks, which can make a newer desktop save look "older" to the
+          // phone. If cloud content differs and this device is not actively editing,
+          // pull the cloud content.
+          if (incomingSnapshotString === localSnapshotString) {
+            lastSavedSnapshotRef.current = localSnapshotString;
+            latestLocalCloudSnapshotRef.current = localSnapshotString;
+            lastCloudUpdatedAtRef.current = incoming.updated_at || lastCloudUpdatedAtRef.current;
+            setCloudSyncActivity("Synced");
+            return;
+          }
+
+          if (localEditIsFresh) {
+            setCloudSyncActivity("Local edit pending");
+            return;
+          }
+
+          setCloudSyncActivity("Live sync...");
+          applyCloudPlannerData(incoming.planner_data, incoming.updated_at, "Synced");
+          setCloudStatus(`Live-synced cloud data at ${new Date().toLocaleTimeString()}.`);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+
+  useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
-    if (isApplyingCloudRef.current) return;
 
-    const snapshot = getPlannerSnapshot();
-    const snapshotString = snapshotToString(snapshot);
-    if (snapshotString === lastSavedSnapshotRef.current) return;
+    const runTwoSecondCloudSync = async () => {
+      if (isApplyingCloudRef.current || autoCloudSyncInFlightRef.current) return;
 
-    setCloudSyncActivity("Waiting 2s to save...");
-    const timeout = window.setTimeout(() => {
-      performCloudSave({ silent: true });
-    }, 2000);
+      autoCloudSyncInFlightRef.current = true;
+      try {
+        const localSnapshotString = snapshotToCloudComparableString(getPlannerSnapshot());
+        const hasUnsavedLocalWork = localSnapshotString !== lastSavedSnapshotRef.current;
+        const localEditIsFresh = (localDirtyRef.current && Date.now() - lastLocalEditAtRef.current < 5000) || Date.now() < localEditGuardUntilRef.current;
 
-    return () => window.clearTimeout(timeout);
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+        setCloudSyncActivity("Checking cloud...");
+        const { data, error } = await getCloudRecord();
+        lastCloudCheckAtRef.current = Date.now();
+
+        if (error) {
+          setCloudSyncActivity("Sync check failed");
+          setCloudStatus(error.message);
+          return;
+        }
+
+        if (data?.planner_data) {
+          const cloudUpdatedAt = data.updated_at || "";
+          const cloudSnapshotString = snapshotToCloudComparableString(data.planner_data);
+          const cloudDiffersFromLocal = cloudSnapshotString !== localSnapshotString;
+
+          // Do not rely on updated_at comparisons for deciding whether to pull.
+          // Mobile and desktop clocks can disagree, so content difference is the
+          // source of truth. If this device has a fresh local edit, save it. Otherwise,
+          // pull the cloud snapshot so desktop changes appear on mobile automatically.
+          if (cloudDiffersFromLocal) {
+            // The sync checker is pull-only. It should never push this device's
+            // stale local copy over another device. Actual local edits are saved
+            // by the separate debounced auto-save effect above.
+            if (localEditIsFresh) {
+              setCloudSyncActivity("Local edit pending");
+              return;
+            }
+
+            applyCloudPlannerData(data.planner_data, data.updated_at, "Synced");
+            setCloudStatus(`Auto-pulled latest cloud data at ${new Date().toLocaleTimeString()}.`);
+            return;
+          }
+
+          lastSavedSnapshotRef.current = localSnapshotString;
+          latestLocalCloudSnapshotRef.current = localSnapshotString;
+          lastCloudUpdatedAtRef.current = cloudUpdatedAt || lastCloudUpdatedAtRef.current;
+          setCloudSyncActivity("Synced");
+          return;
+        }
+
+        if (localEditIsFresh) {
+          setCloudSyncActivity("Auto-saving...");
+          await performCloudSave({ silent: true });
+        } else {
+          setCloudSyncActivity("Synced");
+        }
+      } finally {
+        autoCloudSyncInFlightRef.current = false;
+      }
+    };
+
+    const kickMobileCloudSync = () => runTwoSecondCloudSync();
+
+    runTwoSecondCloudSync();
+    const interval = window.setInterval(runTwoSecondCloudSync, 2000);
+    const timeoutLoop = window.setTimeout(runTwoSecondCloudSync, 750);
+    window.addEventListener("focus", kickMobileCloudSync);
+    window.addEventListener("pageshow", kickMobileCloudSync);
+    window.addEventListener("online", kickMobileCloudSync);
+    window.addEventListener("touchstart", kickMobileCloudSync, { passive: true });
+    window.addEventListener("pointerdown", kickMobileCloudSync, { passive: true });
+    document.addEventListener("visibilitychange", kickMobileCloudSync);
+
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeoutLoop);
+      window.removeEventListener("focus", kickMobileCloudSync);
+      window.removeEventListener("pageshow", kickMobileCloudSync);
+      window.removeEventListener("online", kickMobileCloudSync);
+      window.removeEventListener("touchstart", kickMobileCloudSync);
+      window.removeEventListener("pointerdown", kickMobileCloudSync);
+      document.removeEventListener("visibilitychange", kickMobileCloudSync);
+    };
+  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -2244,9 +2601,57 @@ export default function ORPlannerApp() {
     }
   };
 
+  const mobilePullFromCloudOnly = async () => {
+    // Mobile top button should behave as pull-only. It must never save stale
+    // local phone state over newer desktop changes.
+    if (cloudAutoSaveTimerRef.current) {
+      window.clearTimeout(cloudAutoSaveTimerRef.current);
+      cloudAutoSaveTimerRef.current = null;
+    }
+    localDirtyRef.current = false;
+    lastLocalEditAtRef.current = 0;
+    localEditGuardUntilRef.current = 0;
+    await performCloudPull({ silent: false });
+  };
+
+  const showMobileMainSyncBox = !isDesktopLayout && (
+    (typeof navigator !== "undefined" && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent || "")) ||
+    (typeof window !== "undefined" && window.matchMedia?.("(max-width: 767px)")?.matches)
+  );
+
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6" style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}>
+    <div
+      className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
+      style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
+    >
       <div className="mx-auto max-w-7xl space-y-4">
+        {showMobileMainSyncBox && (
+        <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-extrabold text-slate-900">Cloud Sync</div>
+              <div className="text-xs font-semibold text-slate-500">Pull latest planner data to this phone</div>
+            </div>
+            {cloudSession ? (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-600">{cloudSyncActivity}</span>
+            ) : (
+              <span className="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-100">Sign in needed</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={mobilePullFromCloudOnly}
+            disabled={cloudBusy || !cloudSession?.user?.id}
+            className="flex min-h-[68px] w-full items-center justify-center gap-3 rounded-3xl bg-slate-900 px-5 py-4 text-lg font-extrabold text-white shadow-lg ring-1 ring-slate-800 disabled:bg-slate-300 disabled:ring-slate-300"
+          >
+            <RotateCcw className={`h-6 w-6 ${cloudBusy ? "animate-spin" : ""}`} />
+            <span>{cloudBusy ? "Syncing Cloud..." : "Sync Cloud Now"}</span>
+          </button>
+          <div className="mt-2 text-center text-[11px] font-semibold text-slate-500">
+            Pull-only sync. This will not save phone data over desktop changes.
+          </div>
+        </div>
+        )}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3156,7 +3561,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v3j · fit screenshot zoom to screen</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4d · phone-only top sync box</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
