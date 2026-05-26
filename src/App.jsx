@@ -2299,13 +2299,13 @@ export default function ORPlannerApp() {
     return "bg-red-100 text-red-700";
   };
 
-  const sfResolveRowReviewState = (baseRow, screenshotType) => {
+  const sfResolveRowReviewState = (baseRow, screenshotType, reservedPlannerCaseIds = new Set()) => {
     const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
     const screenshotKey = normalizeSfKey(screenshotType);
     const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
     const isScheduledProceduresRow = screenshotKey.includes("scheduled procedures") || recommendedKey.includes("import new fast tracking");
     const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
-    const matches = sfGetPlannerMatches(baseRow, matchMode);
+    const matches = sfGetPlannerMatches(baseRow, matchMode).filter((match) => !reservedPlannerCaseIds.has(match.plannerCase.id));
     const bestMatch = matches[0];
 
     let action = "review";
@@ -2377,11 +2377,32 @@ export default function ORPlannerApp() {
       matchStatus: bestMatch?.status || "No Match",
       matchScore: bestMatch?.score || 0,
       matchReasons: bestMatch?.reasons || [],
+      matchedPlannerCaseId: bestMatch?.status === "Match" ? bestMatch.plannerCase.id : "",
     };
   };
 
-  const sfPrepareRows = (rows, screenshotType) =>
-    rows.map((item, index) => {
+  const sfResolveRowsWithUniquePlannerMatches = (rows, screenshotType) => {
+    const reservedPlannerCaseIds = new Set();
+
+    return rows.map((row) => {
+      if (row.actionManuallyEdited) return row;
+
+      const resolved = sfResolveRowReviewState(row, screenshotType, reservedPlannerCaseIds);
+      const updated = { ...row, ...resolved };
+
+      // One existing OR Planner case can only satisfy one Salesforce row.
+      // This prevents two identical Salesforce rows from both being marked
+      // Ignore/No Duplicate when only one matching planner case exists.
+      if (resolved.matchedPlannerCaseId) {
+        reservedPlannerCaseIds.add(resolved.matchedPlannerCaseId);
+      }
+
+      return updated;
+    });
+  };
+
+  const sfPrepareRows = (rows, screenshotType) => {
+    const baseRows = rows.map((item, index) => {
       const surgeon = normalizeSfText(item.surgeon);
       const facilityResolution = sfFacilityFromRowOrSurgeon(item.hospital, surgeon);
 
@@ -2409,13 +2430,11 @@ export default function ORPlannerApp() {
         actionManuallyEdited: false,
       };
 
-      const baseRow = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawBaseRow));
-
-      return {
-        ...baseRow,
-        ...sfResolveRowReviewState(baseRow, screenshotType),
-      };
+      return sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawBaseRow));
     });
+
+    return sfResolveRowsWithUniquePlannerMatches(baseRows, screenshotType);
+  };
 
   useEffect(() => {
     if (!sfExtractedCases.length || !sfScreenshotType) return;
@@ -2423,17 +2442,15 @@ export default function ORPlannerApp() {
     setSfExtractedCases((prev) => {
       let changed = false;
 
-      const next = prev.map((item) => {
-        if (item.actionManuallyEdited) return item;
-
-        const resolved = sfResolveRowReviewState(item, sfScreenshotType);
-        const updated = { ...item, ...resolved };
+      const next = sfResolveRowsWithUniquePlannerMatches(prev, sfScreenshotType).map((updated, index) => {
+        const item = prev[index];
 
         if (
           updated.action !== item.action ||
           updated.selectedPlannerCaseId !== item.selectedPlannerCaseId ||
           updated.matchStatus !== item.matchStatus ||
           updated.matchScore !== item.matchScore ||
+          updated.matchedPlannerCaseId !== item.matchedPlannerCaseId ||
           JSON.stringify(updated.matchReasons || []) !== JSON.stringify(item.matchReasons || [])
         ) {
           changed = true;
@@ -2446,16 +2463,12 @@ export default function ORPlannerApp() {
     });
   }, [casesByDate, sfScreenshotType, sfExtractedCases.length]);
 
-  const sfEffectiveRow = (item) => {
-    if (item.actionManuallyEdited) return item;
-    const resolved = sfResolveRowReviewState(item, sfScreenshotType);
-    return { ...item, ...resolved };
-  };
+  const sfEffectiveRow = (item) => item;
 
   const updateSalesforceRow = (id, patch) => {
     const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
-    setSfExtractedCases((prev) =>
-      prev.map((item) => {
+    setSfExtractedCases((prev) => {
+      const patchedRows = prev.map((item) => {
         if (item.id !== id) return item;
 
         const rawPatched = {
@@ -2464,18 +2477,11 @@ export default function ORPlannerApp() {
           actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
         };
 
-        const patched = sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawPatched));
+        return sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawPatched));
+      });
 
-        if (!patched.actionManuallyEdited) {
-          return {
-            ...patched,
-            ...sfResolveRowReviewState(patched, sfScreenshotType),
-          };
-        }
-
-        return patched;
-      })
-    );
+      return sfResolveRowsWithUniquePlannerMatches(patchedRows, sfScreenshotType);
+    });
     setSfApplySummary("");
   };
 
@@ -3696,7 +3702,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4h · edit-only roster alias controls</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4i · unique Salesforce match consumption</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
