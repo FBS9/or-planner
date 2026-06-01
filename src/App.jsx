@@ -3292,9 +3292,58 @@ export default function ORPlannerApp() {
         [data-or-theme="dark"] .text-yellow-800 {
           color: #fde68a !important;
         }
+
+        [data-or-theme="dark"] .text-amber-900,
+        [data-or-theme="dark"] .text-yellow-900,
+        [data-or-theme="dark"] .text-amber-700,
+        [data-or-theme="dark"] .text-yellow-700,
+        [data-or-theme="dark"] .text-amber-600,
+        [data-or-theme="dark"] .text-yellow-600 {
+          color: #fef3c7 !important;
+        }
+        [data-or-theme="dark"] .bg-amber-50.text-amber-900,
+        [data-or-theme="dark"] .bg-yellow-50.text-yellow-900,
+        [data-or-theme="dark"] .bg-amber-50 .text-amber-900,
+        [data-or-theme="dark"] .bg-yellow-50 .text-yellow-900,
+        [data-or-theme="dark"] .bg-amber-50 .text-amber-800,
+        [data-or-theme="dark"] .bg-yellow-50 .text-yellow-800 {
+          color: #fffbeb !important;
+        }
+        [data-or-theme="dark"] .bg-amber-50,
+        [data-or-theme="dark"] .bg-yellow-50 {
+          border-color: rgba(252, 211, 77, 0.70) !important;
+        }
         [data-or-theme="dark"] .text-red-800,
         [data-or-theme="dark"] .text-red-700 {
           color: #fecaca !important;
+        }
+        [data-or-theme="dark"] .bg-green-100 {
+          background-color: rgba(22, 101, 52, 0.72) !important;
+        }
+        [data-or-theme="dark"] .bg-green-100.text-green-700,
+        [data-or-theme="dark"] .bg-green-100 .text-green-700 {
+          color: #f0fdf4 !important;
+        }
+        [data-or-theme="dark"] .bg-red-100 {
+          background-color: rgba(127, 29, 29, 0.78) !important;
+        }
+        [data-or-theme="dark"] .bg-red-100.text-red-700,
+        [data-or-theme="dark"] .bg-red-100 .text-red-700 {
+          color: #fff1f2 !important;
+        }
+        [data-or-theme="dark"] .bg-yellow-100 {
+          background-color: rgba(133, 77, 14, 0.78) !important;
+        }
+        [data-or-theme="dark"] .bg-yellow-100.text-yellow-800,
+        [data-or-theme="dark"] .bg-yellow-100 .text-yellow-800 {
+          color: #fffbeb !important;
+        }
+        [data-or-theme="dark"] .bg-blue-100 {
+          background-color: rgba(30, 64, 175, 0.72) !important;
+        }
+        [data-or-theme="dark"] .bg-blue-100.text-blue-700,
+        [data-or-theme="dark"] .bg-blue-100 .text-blue-700 {
+          color: #eff6ff !important;
         }
         [data-or-theme="dark"] .border-slate-200 {
           border-color: #475569 !important;
@@ -4482,7 +4531,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4w · dark mode text contrast</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4y · dark mode warning contrast</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
