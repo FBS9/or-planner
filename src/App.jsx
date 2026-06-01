@@ -1223,6 +1223,19 @@ export default function ORPlannerApp() {
     return typed;
   };
 
+  const procedureDraftOptionScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeProcedureSearch(leftValue);
+    const right = normalizeProcedureSearch(rightValue);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.92;
+    const leftTokens = left.split(" ").filter(Boolean);
+    const rightTokens = right.split(" ").filter(Boolean);
+    if (!leftTokens.length || !rightTokens.length) return 0;
+    const overlap = leftTokens.filter((token) => rightTokens.includes(token)).length;
+    return overlap / Math.max(leftTokens.length, rightTokens.length);
+  };
+
   const procedureOptionsForCaseDraft = (draft) => {
     if (!draft) return [];
     const specialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, draft.facility, draft.surgeon));
@@ -1235,7 +1248,7 @@ export default function ORPlannerApp() {
         const sameSpecialty = specialty && itemSpecialty && specialty === itemSpecialty;
         const procedureKey = normalizeProcedureSearch(item.procedure);
         const queryMatch = query && procedureKey.includes(query);
-        const score = query ? Math.max(sfProcedureScore(item.procedure, draft.procedure), queryMatch ? 0.92 : 0) : 0;
+        const score = query ? Math.max(procedureDraftOptionScore(item.procedure, draft.procedure), queryMatch ? 0.92 : 0) : 0;
         return { ...item, sameSpecialty, score };
       })
       .filter((item) => !query || item.score >= 0.35 || normalizeProcedureSearch(item.procedure).includes(query))
@@ -4296,7 +4309,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4q · bulk Cancelled F/U review</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4r · fix case edit modal</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
