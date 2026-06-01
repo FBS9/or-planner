@@ -257,6 +257,7 @@ export default function ORPlannerApp() {
   const [bulkCancelledFuReviewItems, setBulkCancelledFuReviewItems] = useState([]);
   const [bulkCancelledFuSelectedKeys, setBulkCancelledFuSelectedKeys] = useState([]);
   const [swipingCaseId, setSwipingCaseId] = useState(null);
+  const [swipeCasePreview, setSwipeCasePreview] = useState(null);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
   const [selectedReviewCase, setSelectedReviewCase] = useState(null);
   const [reviewDraft, setReviewDraft] = useState(null);
@@ -264,6 +265,7 @@ export default function ORPlannerApp() {
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("or-planner-theme") === "dark");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
@@ -325,6 +327,7 @@ export default function ORPlannerApp() {
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
   const swipeCaseStartRef = useRef(null);
+  const swipeCaseClickBlockRef = useRef(null);
 
   const orderedDays = useMemo(() => getOrderedDays(weekStartDay), [weekStartDay]);
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
@@ -469,6 +472,11 @@ export default function ORPlannerApp() {
   useEffect(() => {
     localStorage.setItem("or-planner-layout-mode", layoutMode);
   }, [layoutMode]);
+
+  useEffect(() => {
+    localStorage.setItem("or-planner-theme", darkMode ? "dark" : "light");
+    document.documentElement.style.colorScheme = darkMode ? "dark" : "light";
+  }, [darkMode]);
 
   const getPlannerSnapshot = () => ({
     plannerTitle,
@@ -1371,24 +1379,56 @@ export default function ORPlannerApp() {
     setPendingCancelledFuCase(null);
   };
 
+  const isNoSwipeTarget = (target) => Boolean(target?.closest?.("input,textarea,select,label,[data-no-swipe='true']"));
+
   const handleCasePointerDown = (event, caseItem) => {
-    if (event.target?.closest?.("button,input,textarea,select,label")) return;
-    swipeCaseStartRef.current = { id: caseItem.id, x: event.clientX, y: event.clientY };
+    if (isNoSwipeTarget(event.target)) return;
+    swipeCaseStartRef.current = { id: caseItem.id, x: event.clientX, y: event.clientY, startedAt: Date.now() };
+    setSwipeCasePreview(null);
+  };
+
+  const handleCasePointerMove = (event, caseItem) => {
+    const start = swipeCaseStartRef.current;
+    if (!start || start.id !== caseItem.id) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dx < -8 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      const x = Math.max(-96, Math.min(0, dx));
+      setSwipeCasePreview({ id: caseItem.id, x });
+    }
   };
 
   const handleCasePointerUp = (event, dateKey, caseItem) => {
     const start = swipeCaseStartRef.current;
     swipeCaseStartRef.current = null;
+    const preview = swipeCasePreview;
+    setSwipeCasePreview(null);
     if (!start || start.id !== caseItem.id) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (dx < -75 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+    const isLeftSwipe = dx < -64 && Math.abs(dx) > Math.abs(dy) * 1.15;
+    if (isLeftSwipe) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      swipeCaseClickBlockRef.current = { id: caseItem.id, until: Date.now() + 450 };
       setSwipingCaseId(caseItem.id);
       window.setTimeout(() => {
         setPendingCancelledFuCase({ dateKey, caseItem });
         setSwipingCaseId(null);
-      }, 160);
+      }, 120);
+    } else if (preview?.id === caseItem.id) {
+      swipeCaseClickBlockRef.current = { id: caseItem.id, until: Date.now() + 180 };
     }
+  };
+
+  const shouldBlockCaseClick = (caseId) => {
+    const blocked = swipeCaseClickBlockRef.current;
+    if (!blocked || blocked.id !== caseId) return false;
+    if (Date.now() > blocked.until) {
+      swipeCaseClickBlockRef.current = null;
+      return false;
+    }
+    return true;
   };
 
   const ftUnreconciledWeekCases = weekDates.flatMap((dateKey) =>
@@ -3176,9 +3216,110 @@ export default function ORPlannerApp() {
 
   return (
     <div
+      data-or-theme={darkMode ? "dark" : "light"}
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent", overscrollBehaviorY: "auto" }}
     >
+      <style>{`
+        [data-or-theme="dark"] {
+          color-scheme: dark;
+          color: #e2e8f0 !important;
+        }
+        [data-or-theme="dark"].text-slate-900,
+        [data-or-theme="dark"].text-slate-800,
+        [data-or-theme="dark"].text-slate-700 {
+          color: #f8fafc !important;
+        }
+        [data-or-theme="dark"] button:not(.bg-slate-900):not(.bg-blue-600):not(.bg-green-700):not(.bg-red-600):not(.bg-slate-950) {
+          color: #e2e8f0;
+        }
+        [data-or-theme="dark"] .bg-white:not(.bg-slate-900) {
+          color: #e2e8f0;
+        }
+        [data-or-theme="dark"] .font-bold:not(.text-blue-700):not(.text-green-700):not(.text-red-700):not(.text-amber-800):not(.text-yellow-800) {
+          color: #f8fafc;
+        }
+        [data-or-theme="dark"] .text-2xl,
+        [data-or-theme="dark"] .text-3xl,
+        [data-or-theme="dark"] .text-4xl {
+          color: #f8fafc !important;
+        }
+        [data-or-theme="dark"].bg-slate-50,
+        [data-or-theme="dark"] .bg-slate-50 {
+          background-color: #0f172a !important;
+        }
+        [data-or-theme="dark"] .bg-white {
+          background-color: #1e293b !important;
+        }
+        [data-or-theme="dark"] .bg-slate-100 {
+          background-color: #334155 !important;
+        }
+        [data-or-theme="dark"] .bg-slate-50 {
+          background-color: #273449 !important;
+        }
+        [data-or-theme="dark"] .bg-blue-50 {
+          background-color: rgba(30, 64, 175, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-green-50 {
+          background-color: rgba(22, 101, 52, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-amber-50,
+        [data-or-theme="dark"] .bg-yellow-50 {
+          background-color: rgba(146, 64, 14, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-red-50 {
+          background-color: rgba(127, 29, 29, 0.30) !important;
+        }
+        [data-or-theme="dark"] .text-slate-900,
+        [data-or-theme="dark"] .text-slate-800,
+        [data-or-theme="dark"] .text-slate-700 {
+          color: #f8fafc !important;
+        }
+        [data-or-theme="dark"] .text-slate-600,
+        [data-or-theme="dark"] .text-slate-500,
+        [data-or-theme="dark"] .text-slate-400 {
+          color: #cbd5e1 !important;
+        }
+        [data-or-theme="dark"] .text-blue-800,
+        [data-or-theme="dark"] .text-blue-700 {
+          color: #bfdbfe !important;
+        }
+        [data-or-theme="dark"] .text-green-800,
+        [data-or-theme="dark"] .text-green-700 {
+          color: #bbf7d0 !important;
+        }
+        [data-or-theme="dark"] .text-amber-800,
+        [data-or-theme="dark"] .text-yellow-800 {
+          color: #fde68a !important;
+        }
+        [data-or-theme="dark"] .text-red-800,
+        [data-or-theme="dark"] .text-red-700 {
+          color: #fecaca !important;
+        }
+        [data-or-theme="dark"] .border-slate-200 {
+          border-color: #475569 !important;
+        }
+        [data-or-theme="dark"] .ring-slate-200 {
+          --tw-ring-color: #475569 !important;
+        }
+        [data-or-theme="dark"] input,
+        [data-or-theme="dark"] select,
+        [data-or-theme="dark"] textarea,
+        [data-or-theme="dark"] .input {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+          border-color: #475569 !important;
+        }
+        [data-or-theme="dark"] input::placeholder,
+        [data-or-theme="dark"] textarea::placeholder {
+          color: #94a3b8 !important;
+        }
+        [data-or-theme="dark"] .shadow-sm,
+        [data-or-theme="dark"] .shadow-lg,
+        [data-or-theme="dark"] .shadow-xl {
+          box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
+        }
+      `}</style>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -3216,6 +3357,7 @@ export default function ORPlannerApp() {
                     <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
                   </label>
                   <button onClick={() => { setShowMobileActions(false); setShowCancelledFuCasesModal(true); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><ClipboardList className="mr-2 h-4 w-4" /> Cancelled F/U Cases</button>
+                  <button onClick={() => { setDarkMode((prev) => !prev); setShowMobileActions(false); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="mr-2 inline-flex h-4 w-4 items-center justify-center text-base leading-none">{darkMode ? "☀" : "☾"}</span> {darkMode ? "Light Mode" : "Dark Mode"}</button>
                   <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
                 </div>
               )}
@@ -4015,16 +4157,24 @@ export default function ORPlannerApp() {
                     <motion.div
                       key={c.id}
                       initial={{ opacity: 0, scale: 0.98 }}
-                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : swipingCaseId === c.id ? { opacity: 1, scale: 1, x: -90 } : { opacity: 1, scale: 1, x: 0 }}
-                      transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
-                      className="rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100 touch-pan-y"
+                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : swipingCaseId === c.id ? { opacity: 1, scale: 1, x: -90 } : swipeCasePreview?.id === c.id ? { opacity: 1, scale: 1, x: swipeCasePreview.x } : { opacity: 1, scale: 1, x: 0 }}
+                      transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : swipeCasePreview?.id === c.id ? { duration: 0.02 } : { duration: 0.12 }}
+                      className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100 touch-pan-y"
                       onPointerDown={(event) => handleCasePointerDown(event, c)}
+                      onPointerMove={(event) => handleCasePointerMove(event, c)}
                       onPointerUp={(event) => handleCasePointerUp(event, selectedDate, c)}
-                      onPointerCancel={() => { swipeCaseStartRef.current = null; }}
+                      onPointerCancel={() => { swipeCaseStartRef.current = null; setSwipeCasePreview(null); }}
                     >
                       <button
                         type="button"
-                        onClick={() => openCaseEditor(selectedDate, c)}
+                        onClick={(event) => {
+                          if (shouldBlockCaseClick(c.id)) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            return;
+                          }
+                          openCaseEditor(selectedDate, c);
+                        }}
                         className="w-full text-left transition active:scale-[0.99]"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4043,6 +4193,7 @@ export default function ORPlannerApp() {
                         <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => value ? requestReconcileCase(selectedDate, c) : updateCase(c.id, { reconciled: value })} />
                         <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
                         <button
+                          data-no-swipe="true"
                           onClick={() => setPendingCancelledFuCase({ dateKey: selectedDate, caseItem: c })}
                           className="flex h-9 w-9 items-center justify-center rounded-xl text-amber-600 ring-1 ring-amber-100 hover:bg-amber-50"
                           aria-label="Move case to Cancelled F/U"
@@ -4050,7 +4201,7 @@ export default function ORPlannerApp() {
                         >
                           <ClipboardList className="h-4 w-4" />
                         </button>
-                        <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
+                        <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" data-no-swipe="true" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </motion.div>
                   ))
@@ -4331,7 +4482,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4t · bulk Cancelled F/U near cases</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4w · dark mode text contrast</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
