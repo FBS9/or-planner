@@ -257,6 +257,7 @@ export default function ORPlannerApp() {
   const [bulkCancelledFuReviewItems, setBulkCancelledFuReviewItems] = useState([]);
   const [bulkCancelledFuSelectedKeys, setBulkCancelledFuSelectedKeys] = useState([]);
   const [swipingCaseId, setSwipingCaseId] = useState(null);
+  const [swipeCasePreview, setSwipeCasePreview] = useState(null);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
   const [selectedReviewCase, setSelectedReviewCase] = useState(null);
   const [reviewDraft, setReviewDraft] = useState(null);
@@ -325,6 +326,7 @@ export default function ORPlannerApp() {
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
   const swipeCaseStartRef = useRef(null);
+  const swipeCaseClickBlockRef = useRef(null);
 
   const orderedDays = useMemo(() => getOrderedDays(weekStartDay), [weekStartDay]);
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
@@ -1371,24 +1373,56 @@ export default function ORPlannerApp() {
     setPendingCancelledFuCase(null);
   };
 
+  const isNoSwipeTarget = (target) => Boolean(target?.closest?.("input,textarea,select,label,[data-no-swipe='true']"));
+
   const handleCasePointerDown = (event, caseItem) => {
-    if (event.target?.closest?.("button,input,textarea,select,label")) return;
-    swipeCaseStartRef.current = { id: caseItem.id, x: event.clientX, y: event.clientY };
+    if (isNoSwipeTarget(event.target)) return;
+    swipeCaseStartRef.current = { id: caseItem.id, x: event.clientX, y: event.clientY, startedAt: Date.now() };
+    setSwipeCasePreview(null);
+  };
+
+  const handleCasePointerMove = (event, caseItem) => {
+    const start = swipeCaseStartRef.current;
+    if (!start || start.id !== caseItem.id) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dx < -8 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      const x = Math.max(-96, Math.min(0, dx));
+      setSwipeCasePreview({ id: caseItem.id, x });
+    }
   };
 
   const handleCasePointerUp = (event, dateKey, caseItem) => {
     const start = swipeCaseStartRef.current;
     swipeCaseStartRef.current = null;
+    const preview = swipeCasePreview;
+    setSwipeCasePreview(null);
     if (!start || start.id !== caseItem.id) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (dx < -75 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+    const isLeftSwipe = dx < -64 && Math.abs(dx) > Math.abs(dy) * 1.15;
+    if (isLeftSwipe) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      swipeCaseClickBlockRef.current = { id: caseItem.id, until: Date.now() + 450 };
       setSwipingCaseId(caseItem.id);
       window.setTimeout(() => {
         setPendingCancelledFuCase({ dateKey, caseItem });
         setSwipingCaseId(null);
-      }, 160);
+      }, 120);
+    } else if (preview?.id === caseItem.id) {
+      swipeCaseClickBlockRef.current = { id: caseItem.id, until: Date.now() + 180 };
     }
+  };
+
+  const shouldBlockCaseClick = (caseId) => {
+    const blocked = swipeCaseClickBlockRef.current;
+    if (!blocked || blocked.id !== caseId) return false;
+    if (Date.now() > blocked.until) {
+      swipeCaseClickBlockRef.current = null;
+      return false;
+    }
+    return true;
   };
 
   const ftUnreconciledWeekCases = weekDates.flatMap((dateKey) =>
@@ -4015,16 +4049,24 @@ export default function ORPlannerApp() {
                     <motion.div
                       key={c.id}
                       initial={{ opacity: 0, scale: 0.98 }}
-                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : swipingCaseId === c.id ? { opacity: 1, scale: 1, x: -90 } : { opacity: 1, scale: 1, x: 0 }}
-                      transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
-                      className="rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100 touch-pan-y"
+                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : swipingCaseId === c.id ? { opacity: 1, scale: 1, x: -90 } : swipeCasePreview?.id === c.id ? { opacity: 1, scale: 1, x: swipeCasePreview.x } : { opacity: 1, scale: 1, x: 0 }}
+                      transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : swipeCasePreview?.id === c.id ? { duration: 0.02 } : { duration: 0.12 }}
+                      className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100 touch-pan-y"
                       onPointerDown={(event) => handleCasePointerDown(event, c)}
+                      onPointerMove={(event) => handleCasePointerMove(event, c)}
                       onPointerUp={(event) => handleCasePointerUp(event, selectedDate, c)}
-                      onPointerCancel={() => { swipeCaseStartRef.current = null; }}
+                      onPointerCancel={() => { swipeCaseStartRef.current = null; setSwipeCasePreview(null); }}
                     >
                       <button
                         type="button"
-                        onClick={() => openCaseEditor(selectedDate, c)}
+                        onClick={(event) => {
+                          if (shouldBlockCaseClick(c.id)) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            return;
+                          }
+                          openCaseEditor(selectedDate, c);
+                        }}
                         className="w-full text-left transition active:scale-[0.99]"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4043,6 +4085,7 @@ export default function ORPlannerApp() {
                         <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => value ? requestReconcileCase(selectedDate, c) : updateCase(c.id, { reconciled: value })} />
                         <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
                         <button
+                          data-no-swipe="true"
                           onClick={() => setPendingCancelledFuCase({ dateKey: selectedDate, caseItem: c })}
                           className="flex h-9 w-9 items-center justify-center rounded-xl text-amber-600 ring-1 ring-amber-100 hover:bg-amber-50"
                           aria-label="Move case to Cancelled F/U"
@@ -4050,7 +4093,7 @@ export default function ORPlannerApp() {
                         >
                           <ClipboardList className="h-4 w-4" />
                         </button>
-                        <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
+                        <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" data-no-swipe="true" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </motion.div>
                   ))
@@ -4331,7 +4374,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4t · bulk Cancelled F/U near cases</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4u · reliable mobile swipe to Cancelled F/U</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
