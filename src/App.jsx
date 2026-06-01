@@ -250,6 +250,13 @@ export default function ORPlannerApp() {
   const [sfApplySummary, setSfApplySummary] = useState("");
   const [showUnreconciledOnly, setShowUnreconciledOnly] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
+  const [cancelledFuCases, setCancelledFuCases] = useState([]);
+  const [showCancelledFuCasesModal, setShowCancelledFuCasesModal] = useState(false);
+  const [pendingCancelledFuCase, setPendingCancelledFuCase] = useState(null);
+  const [showBulkCancelledFuReview, setShowBulkCancelledFuReview] = useState(false);
+  const [bulkCancelledFuReviewItems, setBulkCancelledFuReviewItems] = useState([]);
+  const [bulkCancelledFuSelectedKeys, setBulkCancelledFuSelectedKeys] = useState([]);
+  const [swipingCaseId, setSwipingCaseId] = useState(null);
   const [deletingCaseIds, setDeletingCaseIds] = useState([]);
   const [selectedReviewCase, setSelectedReviewCase] = useState(null);
   const [reviewDraft, setReviewDraft] = useState(null);
@@ -317,6 +324,7 @@ export default function ORPlannerApp() {
   const procedureInputRef = useRef(null);
   const mobileSurgeonInputRef = useRef(null);
   const desktopSurgeonInputRef = useRef(null);
+  const swipeCaseStartRef = useRef(null);
 
   const orderedDays = useMemo(() => getOrderedDays(weekStartDay), [weekStartDay]);
   const weekStart = useMemo(() => startOfWeek(fromDateKey(selectedDate), weekStartDay), [selectedDate, weekStartDay]);
@@ -466,6 +474,7 @@ export default function ORPlannerApp() {
     plannerTitle,
     selectedDate,
     casesByDate,
+    cancelledFuCases,
     facilities: sortedFacilities,
     surgeonRosters,
     procedureExclusions,
@@ -481,6 +490,7 @@ export default function ORPlannerApp() {
     // Cloud sync should update planner data without changing the day the user is currently viewing.
     // Otherwise every auto-pull kicks the app back to today.
     setCasesByDate(snapshot.casesByDate || {});
+    setCancelledFuCases(Array.isArray(snapshot.cancelledFuCases) ? snapshot.cancelledFuCases : []);
     const nextFacilities = (Array.isArray(snapshot.facilities) ? snapshot.facilities : Object.keys(snapshot.surgeonRosters || {})).sort((a, b) => a.localeCompare(b));
     setFacilities(nextFacilities);
     setSurgeonRosters(ensureRosterShape(snapshot.surgeonRosters || buildEmptyRosters(nextFacilities), nextFacilities));
@@ -501,6 +511,7 @@ export default function ORPlannerApp() {
         setPlannerTitle(parsed.plannerTitle || parsed.weekTitle || "OR Calendar Planner");
         setSelectedDate(todayKey);
         setCasesByDate(parsed.casesByDate || {});
+        setCancelledFuCases(Array.isArray(parsed.cancelledFuCases) ? parsed.cancelledFuCases : []);
         const parsedFacilities = getFacilitiesFromPlanner(parsed).sort((a, b) => a.localeCompare(b));
         setFacilities(parsedFacilities);
         setRosterFacility((prev) => prev === ALL_SURGEONS || parsedFacilities.includes(prev) ? prev : ALL_SURGEONS);
@@ -524,6 +535,7 @@ export default function ORPlannerApp() {
           });
           setPlannerTitle(old.weekTitle || "OR Calendar Planner");
           setCasesByDate(migrated);
+          setCancelledFuCases(Array.isArray(old.cancelledFuCases) ? old.cancelledFuCases : []);
           const oldFacilities = getFacilitiesFromPlanner({ ...old, casesByDate: migrated }).sort((a, b) => a.localeCompare(b));
           setFacilities(oldFacilities);
           setRosterFacility((prev) => prev === ALL_SURGEONS || oldFacilities.includes(prev) ? prev : ALL_SURGEONS);
@@ -546,7 +558,7 @@ export default function ORPlannerApp() {
   useEffect(() => {
     if (!plannerLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(getPlannerSnapshot()));
-  }, [plannerTitle, selectedDate, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded]);
+  }, [plannerTitle, selectedDate, casesByDate, cancelledFuCases, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded]);
 
   useEffect(() => {
     if (!plannerLoaded) return;
@@ -600,7 +612,7 @@ export default function ORPlannerApp() {
         localEditGuardUntilRef.current = Math.max(localEditGuardUntilRef.current, Date.now() + 3500);
       }
     }
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, cancelledFuCases, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!plannerLoaded || !autoCloudReady || !cloudSession?.user?.id) return;
@@ -624,7 +636,7 @@ export default function ORPlannerApp() {
     return () => {
       if (cloudAutoSaveTimerRef.current) window.clearTimeout(cloudAutoSaveTimerRef.current);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, cancelledFuCases, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -734,9 +746,27 @@ export default function ORPlannerApp() {
     return normalized;
   };
 
+  const normalizeCancelledFuCasesForCloudCompare = (items = []) => (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      id: item?.id || "",
+      cancelledFuId: item?.cancelledFuId || "",
+      originalDateKey: item?.originalDateKey || item?.date || "",
+      movedAt: item?.movedAt || "",
+      facility: item?.facility || "",
+      surgeon: item?.surgeon || "",
+      procedure: item?.procedure || "",
+      notes: item?.notes || "",
+      time: item?.time || "",
+      fastTracking: Boolean(item?.fastTracking),
+      reconciled: Boolean(item?.reconciled),
+      growth: Boolean(item?.growth),
+    }))
+    .sort((a, b) => `${a.originalDateKey}|${a.facility}|${a.surgeon}|${a.procedure}|${a.cancelledFuId}|${a.id}`.localeCompare(`${b.originalDateKey}|${b.facility}|${b.surgeon}|${b.procedure}|${b.cancelledFuId}|${b.id}`));
+
   const snapshotToCloudComparableString = (snapshot = {}) => JSON.stringify({
     plannerTitle: snapshot.plannerTitle || snapshot.weekTitle || "OR Calendar Planner",
     casesByDate: normalizeCasesByDateForCloudCompare(snapshot.casesByDate || {}),
+    cancelledFuCases: normalizeCancelledFuCasesForCloudCompare(snapshot.cancelledFuCases || []),
     facilities: sortStringArray(snapshot.facilities),
     surgeonRosters: normalizeSurgeonRostersForCloudCompare(snapshot.surgeonRosters || {}),
     procedureExclusions: sortStringArray(snapshot.procedureExclusions),
@@ -1068,7 +1098,7 @@ export default function ORPlannerApp() {
       window.removeEventListener("pointerdown", kickMobileCloudSync);
       document.removeEventListener("visibilitychange", kickMobileCloudSync);
     };
-  }, [plannerTitle, casesByDate, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
+  }, [plannerTitle, casesByDate, cancelledFuCases, facilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay, plannerLoaded, autoCloudReady, cloudSession?.user?.id]);
 
   const selectedDateCases = casesByDate[selectedDate] || [];
   const matchesSelectedFacility = (c) => selectedFacility === ALL_FACILITIES || c.facility === selectedFacility;
@@ -1193,6 +1223,19 @@ export default function ORPlannerApp() {
     return typed;
   };
 
+  const procedureDraftOptionScore = (leftValue = "", rightValue = "") => {
+    const left = normalizeProcedureSearch(leftValue);
+    const right = normalizeProcedureSearch(rightValue);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.92;
+    const leftTokens = left.split(" ").filter(Boolean);
+    const rightTokens = right.split(" ").filter(Boolean);
+    if (!leftTokens.length || !rightTokens.length) return 0;
+    const overlap = leftTokens.filter((token) => rightTokens.includes(token)).length;
+    return overlap / Math.max(leftTokens.length, rightTokens.length);
+  };
+
   const procedureOptionsForCaseDraft = (draft) => {
     if (!draft) return [];
     const specialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, draft.facility, draft.surgeon));
@@ -1205,7 +1248,7 @@ export default function ORPlannerApp() {
         const sameSpecialty = specialty && itemSpecialty && specialty === itemSpecialty;
         const procedureKey = normalizeProcedureSearch(item.procedure);
         const queryMatch = query && procedureKey.includes(query);
-        const score = query ? Math.max(sfProcedureScore(item.procedure, draft.procedure), queryMatch ? 0.92 : 0) : 0;
+        const score = query ? Math.max(procedureDraftOptionScore(item.procedure, draft.procedure), queryMatch ? 0.92 : 0) : 0;
         return { ...item, sameSpecialty, score };
       })
       .filter((item) => !query || item.score >= 0.35 || normalizeProcedureSearch(item.procedure).includes(query))
@@ -1302,6 +1345,127 @@ export default function ORPlannerApp() {
       setCasesByDate((prev) => ({ ...prev, [selectedDate]: (prev[selectedDate] || []).filter((c) => c.id !== id) }));
       setDeletingCaseIds((prev) => prev.filter((caseId) => caseId !== id));
     }, 220);
+  };
+
+  const buildCancelledFuCase = (dateKey, caseItem, source = "single") => ({
+    ...caseItem,
+    cancelledFuId: `cancelled-fu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    originalDateKey: dateKey,
+    movedAt: new Date().toISOString(),
+    cancelledFuSource: source,
+  });
+
+  const moveCaseToCancelledFu = (dateKey, caseItem, source = "single") => {
+    if (!dateKey || !caseItem?.id) return;
+    const archived = buildCancelledFuCase(dateKey, caseItem, source);
+    setCasesByDate((prev) => ({
+      ...prev,
+      [dateKey]: (prev[dateKey] || []).filter((c) => c.id !== caseItem.id),
+    }));
+    setCancelledFuCases((prev) => [archived, ...prev]);
+  };
+
+  const confirmMoveCaseToCancelledFu = () => {
+    if (!pendingCancelledFuCase?.caseItem) return;
+    moveCaseToCancelledFu(pendingCancelledFuCase.dateKey, pendingCancelledFuCase.caseItem, "single");
+    setPendingCancelledFuCase(null);
+  };
+
+  const handleCasePointerDown = (event, caseItem) => {
+    if (event.target?.closest?.("button,input,textarea,select,label")) return;
+    swipeCaseStartRef.current = { id: caseItem.id, x: event.clientX, y: event.clientY };
+  };
+
+  const handleCasePointerUp = (event, dateKey, caseItem) => {
+    const start = swipeCaseStartRef.current;
+    swipeCaseStartRef.current = null;
+    if (!start || start.id !== caseItem.id) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dx < -75 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+      setSwipingCaseId(caseItem.id);
+      window.setTimeout(() => {
+        setPendingCancelledFuCase({ dateKey, caseItem });
+        setSwipingCaseId(null);
+      }, 160);
+    }
+  };
+
+  const ftUnreconciledWeekCases = weekDates.flatMap((dateKey) =>
+    getCasesForDate(dateKey)
+      .filter((caseItem) => caseItem.fastTracking && !caseItem.reconciled)
+      .map((caseItem) => ({ ...caseItem, displayDateKey: dateKey }))
+  );
+
+  const bulkCancelledFuItemKey = (item) => `${item.displayDateKey || item.date || selectedDate}::${item.id}`;
+
+  const openFtUnreconciledWeekReview = () => {
+    const items = ftUnreconciledWeekCases;
+    if (items.length === 0) {
+      alert("No FT unreconciled cases found for this selected week/facility filter.");
+      return;
+    }
+    setBulkCancelledFuReviewItems(items);
+    setBulkCancelledFuSelectedKeys(items.map(bulkCancelledFuItemKey));
+    setShowBulkCancelledFuReview(true);
+  };
+
+  const toggleBulkCancelledFuSelection = (key) => {
+    setBulkCancelledFuSelectedKeys((prev) =>
+      prev.includes(key) ? prev.filter((itemKey) => itemKey !== key) : [...prev, key]
+    );
+  };
+
+  const setAllBulkCancelledFuSelection = (checked) => {
+    setBulkCancelledFuSelectedKeys(checked ? bulkCancelledFuReviewItems.map(bulkCancelledFuItemKey) : []);
+  };
+
+  const closeBulkCancelledFuReview = () => {
+    setShowBulkCancelledFuReview(false);
+    setBulkCancelledFuReviewItems([]);
+    setBulkCancelledFuSelectedKeys([]);
+  };
+
+  const confirmBulkCancelledFuMove = () => {
+    const selectedSet = new Set(bulkCancelledFuSelectedKeys);
+    const selectedItems = bulkCancelledFuReviewItems.filter((item) => selectedSet.has(bulkCancelledFuItemKey(item)));
+    if (selectedItems.length === 0) {
+      alert("Select at least one FT unreconciled case to move.");
+      return;
+    }
+    const idsByDate = selectedItems.reduce((acc, item) => {
+      acc[item.displayDateKey] = acc[item.displayDateKey] || new Set();
+      acc[item.displayDateKey].add(item.id);
+      return acc;
+    }, {});
+    const archived = selectedItems.map((item) => {
+      const { displayDateKey, ...caseItem } = item;
+      return buildCancelledFuCase(displayDateKey, caseItem, "bulk-ft-unreconciled");
+    });
+    setCasesByDate((prev) => {
+      const next = { ...prev };
+      Object.entries(idsByDate).forEach(([dateKey, ids]) => {
+        next[dateKey] = (next[dateKey] || []).filter((caseItem) => !ids.has(caseItem.id));
+      });
+      return next;
+    });
+    setCancelledFuCases((prev) => [...archived, ...prev]);
+    closeBulkCancelledFuReview();
+  };
+
+  const restoreCancelledFuCase = (cancelledFuId) => {
+    const item = cancelledFuCases.find((caseItem) => caseItem.cancelledFuId === cancelledFuId);
+    if (!item) return;
+    const restoreDateKey = item.originalDateKey || item.date || selectedDate;
+    const { cancelledFuId: _cancelledFuId, originalDateKey, movedAt, cancelledFuSource, displayDateKey, ...caseToRestore } = item;
+    setCancelledFuCases((prev) => prev.filter((caseItem) => caseItem.cancelledFuId !== cancelledFuId));
+    setCasesByDate((prev) => ({ ...prev, [restoreDateKey]: [...(prev[restoreDateKey] || []), { ...caseToRestore, date: restoreDateKey, id: caseToRestore.id || crypto.randomUUID() }] }));
+  };
+
+  const deleteCancelledFuCase = (cancelledFuId) => {
+    const confirmed = window.confirm("Permanently delete this Cancelled F/U case? This cannot be undone.");
+    if (!confirmed) return;
+    setCancelledFuCases((prev) => prev.filter((caseItem) => caseItem.cancelledFuId !== cancelledFuId));
   };
 
   const openCaseEditor = (dateKey, item, source = "normal") => {
@@ -1684,7 +1848,7 @@ export default function ORPlannerApp() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, facilities: sortedFacilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ plannerTitle, selectedDate, casesByDate, cancelledFuCases, facilities: sortedFacilities, surgeonRosters, procedureExclusions, manualProcedureRosterItems, sfSurgeonAliases, sfProcedureAliases, growthSurgeons, weekStartDay }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -3051,6 +3215,7 @@ export default function ORPlannerApp() {
                     <Upload className="mr-2 h-4 w-4" /> Import
                     <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
                   </label>
+                  <button onClick={() => { setShowMobileActions(false); setShowCancelledFuCasesModal(true); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><ClipboardList className="mr-2 h-4 w-4" /> Cancelled F/U Cases</button>
                   <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
                 </div>
               )}
@@ -3753,6 +3918,21 @@ export default function ORPlannerApp() {
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="p-3 md:p-4">
               <div className="space-y-3">
+                <div className="flex flex-col gap-2 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-amber-900">Cancelled F/U cleanup</div>
+                    <div className="text-xs text-amber-800">Review FT checked + Rec unchecked cases for this week.</div>
+                  </div>
+                  <button
+                    onClick={openFtUnreconciledWeekReview}
+                    disabled={ftUnreconciledWeekCases.length === 0}
+                    className="inline-flex min-h-10 items-center justify-center rounded-2xl bg-white px-4 py-2 text-sm font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Review FT Unrec Week
+                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900 ring-1 ring-amber-200">{ftUnreconciledWeekCases.length}</span>
+                  </button>
+                </div>
+
                 {activeStatReportType && (
                 <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
                   <div className="mt-8 w-full max-w-2xl rounded-3xl bg-white p-4 shadow-xl ring-1 ring-slate-200">
@@ -3835,9 +4015,12 @@ export default function ORPlannerApp() {
                     <motion.div
                       key={c.id}
                       initial={{ opacity: 0, scale: 0.98 }}
-                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : { opacity: 1, scale: 1 }}
+                      animate={deletingCaseIds.includes(c.id) ? { opacity: 0, scale: [1, 1.06, 0.72], borderRadius: ["1rem", "999px", "999px"] } : swipingCaseId === c.id ? { opacity: 1, scale: 1, x: -90 } : { opacity: 1, scale: 1, x: 0 }}
                       transition={deletingCaseIds.includes(c.id) ? { duration: 0.22, ease: "easeOut" } : { duration: 0.12 }}
-                      className="rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100"
+                      className="rounded-2xl border border-slate-200 bg-white p-3 text-sm ring-1 ring-slate-100 touch-pan-y"
+                      onPointerDown={(event) => handleCasePointerDown(event, c)}
+                      onPointerUp={(event) => handleCasePointerUp(event, selectedDate, c)}
+                      onPointerCancel={() => { swipeCaseStartRef.current = null; }}
                     >
                       <button
                         type="button"
@@ -3855,10 +4038,18 @@ export default function ORPlannerApp() {
                         </div>
                       </button>
 
-                      <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2">
+                      <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto_auto] items-center gap-2">
                         <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
                         <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => value ? requestReconcileCase(selectedDate, c) : updateCase(c.id, { reconciled: value })} />
                         <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
+                        <button
+                          onClick={() => setPendingCancelledFuCase({ dateKey: selectedDate, caseItem: c })}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-amber-600 ring-1 ring-amber-100 hover:bg-amber-50"
+                          aria-label="Move case to Cancelled F/U"
+                          title="Move to Cancelled F/U"
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                        </button>
                         <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </motion.div>
@@ -3869,6 +4060,140 @@ export default function ORPlannerApp() {
           </Card>
         </div>
       </div>
+
+      {pendingCancelledFuCase && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
+          <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="w-full max-w-md rounded-3xl bg-white p-5 shadow-xl">
+            <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Move to Cancelled F/U?</div>
+            <h3 className="mt-2 text-xl font-bold text-slate-900">Move this case out of the active planner?</h3>
+            <div className="mt-3 rounded-2xl bg-slate-100 p-3 text-sm text-slate-700">
+              <div><span className="font-semibold">Date:</span> {formatLongDate(pendingCancelledFuCase.dateKey)}</div>
+              <div><span className="font-semibold">Facility:</span> {pendingCancelledFuCase.caseItem?.facility || "—"}</div>
+              <div><span className="font-semibold">Surgeon:</span> {pendingCancelledFuCase.caseItem?.surgeon || "—"}</div>
+              <div><span className="font-semibold">Procedure:</span> {pendingCancelledFuCase.caseItem?.procedure || "—"}</div>
+            </div>
+            <p className="mt-3 text-sm text-slate-500">This removes the case from active schedule counts but keeps it in More → Cancelled F/U Cases so you can restore or delete it later.</p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={() => setPendingCancelledFuCase(null)} variant="secondary" className="rounded-2xl py-5">Cancel</Button>
+              <Button onClick={confirmMoveCaseToCancelledFu} className="rounded-2xl py-5">Move to Cancelled F/U</Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showBulkCancelledFuReview && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
+          <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-5">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Review FT unreconciled cases</div>
+                <h3 className="mt-1 text-2xl font-bold text-slate-900">Move selected cases to Cancelled F/U</h3>
+                <p className="mt-1 text-sm text-slate-500">Only FT checked + Rec unchecked cases from the selected week/facility filter appear here. Uncheck any case you do not want to move yet.</p>
+              </div>
+              <Button onClick={closeBulkCancelledFuReview} variant="outline" className="rounded-2xl">Close</Button>
+            </div>
+            <div className="border-b border-slate-200 bg-slate-50 px-5 py-3">
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-800 ring-1 ring-slate-200">
+                <span>Select all eligible cases</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-500">{bulkCancelledFuSelectedKeys.length} of {bulkCancelledFuReviewItems.length} selected</span>
+                  <input
+                    type="checkbox"
+                    checked={bulkCancelledFuReviewItems.length > 0 && bulkCancelledFuSelectedKeys.length === bulkCancelledFuReviewItems.length}
+                    onChange={(e) => setAllBulkCancelledFuSelection(e.target.checked)}
+                    className="h-5 w-5 rounded border-slate-300"
+                  />
+                </span>
+              </label>
+            </div>
+            <div className="max-h-[55vh] overflow-auto p-5">
+              <div className="space-y-3">
+                {bulkCancelledFuReviewItems.map((caseItem) => {
+                  const itemKey = bulkCancelledFuItemKey(caseItem);
+                  const checked = bulkCancelledFuSelectedKeys.includes(itemKey);
+                  return (
+                    <label key={itemKey} className={`flex cursor-pointer items-start gap-3 rounded-2xl p-4 text-sm ring-1 transition ${checked ? "bg-amber-50 ring-amber-200" : "bg-white ring-slate-200 hover:bg-slate-50"}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBulkCancelledFuSelection(itemKey)}
+                        className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-slate-900">{formatLongDate(caseItem.displayDateKey)} {caseItem.time ? `· ${caseItem.time}` : ""}</div>
+                        <div className="mt-2 grid gap-1 text-slate-700 md:grid-cols-3">
+                          <div><span className="font-semibold">Facility:</span> {caseItem.facility || "—"}</div>
+                          <div><span className="font-semibold">Surgeon:</span> {caseItem.surgeon || "—"}</div>
+                          <div><span className="font-semibold">Procedure:</span> {caseItem.procedure || "—"}</div>
+                        </div>
+                        {caseItem.notes && <div className="mt-2 text-slate-500"><span className="font-semibold">Notes:</span> {caseItem.notes}</div>}
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
+                          <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">FT Yes</span>
+                          <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">REC No</span>
+                          <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">Growth {caseItem.growth ? "Yes" : "No"}</span>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid gap-2 border-t border-slate-200 p-5 sm:grid-cols-2">
+              <Button onClick={closeBulkCancelledFuReview} variant="secondary" className="rounded-2xl py-5">Cancel</Button>
+              <Button onClick={confirmBulkCancelledFuMove} className="rounded-2xl py-5" disabled={bulkCancelledFuSelectedKeys.length === 0}>
+                Move {bulkCancelledFuSelectedKeys.length} Selected
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showCancelledFuCasesModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
+          <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-5">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Cancelled F/U Cases</div>
+                <h3 className="mt-1 text-2xl font-bold text-slate-900">Cancelled follow-up holding list</h3>
+                <p className="mt-1 text-sm text-slate-500">These cases are removed from active schedule counts. Restore them to return them to the planner.</p>
+              </div>
+              <Button onClick={() => setShowCancelledFuCasesModal(false)} variant="outline" className="rounded-2xl">Close</Button>
+            </div>
+            <div className="max-h-[65vh] overflow-auto p-5">
+              {cancelledFuCases.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No Cancelled F/U cases yet.</div>
+              ) : (
+                <div className="space-y-3">
+                  {cancelledFuCases.map((caseItem) => (
+                    <div key={caseItem.cancelledFuId} className="rounded-2xl bg-slate-50 p-4 text-sm ring-1 ring-slate-200">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900">{formatLongDate(caseItem.originalDateKey || caseItem.date || selectedDate)} {caseItem.time ? `· ${caseItem.time}` : ""}</div>
+                          <div className="mt-2 grid gap-1 text-slate-700">
+                            <div><span className="font-semibold">Facility:</span> {caseItem.facility || "—"}</div>
+                            <div><span className="font-semibold">Surgeon:</span> {caseItem.surgeon || "—"}</div>
+                            <div><span className="font-semibold">Procedure:</span> {caseItem.procedure || "—"}</div>
+                            {caseItem.notes && <div><span className="font-semibold">Notes:</span> {caseItem.notes}</div>}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
+                            <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">FT {caseItem.fastTracking ? "Yes" : "No"}</span>
+                            <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">REC {caseItem.reconciled ? "Yes" : "No"}</span>
+                            <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">Growth {caseItem.growth ? "Yes" : "No"}</span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <Button onClick={() => restoreCancelledFuCase(caseItem.cancelledFuId)} variant="secondary" className="rounded-2xl">Restore</Button>
+                          <button onClick={() => deleteCancelledFuCase(caseItem.cancelledFuId)} className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-600" aria-label="Delete cancelled F/U case"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {pendingReconcileCase && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
@@ -4006,7 +4331,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4o · unique manual match options</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4t · bulk Cancelled F/U near cases</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
