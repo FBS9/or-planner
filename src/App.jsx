@@ -3223,6 +3223,26 @@ export default function ORPlannerApp() {
       <style>{`
         [data-or-theme="dark"] {
           color-scheme: dark;
+          color: #e2e8f0 !important;
+        }
+        [data-or-theme="dark"].text-slate-900,
+        [data-or-theme="dark"].text-slate-800,
+        [data-or-theme="dark"].text-slate-700 {
+          color: #f8fafc !important;
+        }
+        [data-or-theme="dark"] button:not(.bg-slate-900):not(.bg-blue-600):not(.bg-green-700):not(.bg-red-600):not(.bg-slate-950) {
+          color: #e2e8f0;
+        }
+        [data-or-theme="dark"] .bg-white:not(.bg-slate-900) {
+          color: #e2e8f0;
+        }
+        [data-or-theme="dark"] .font-bold:not(.text-blue-700):not(.text-green-700):not(.text-red-700):not(.text-amber-800):not(.text-yellow-800) {
+          color: #f8fafc;
+        }
+        [data-or-theme="dark"] .text-2xl,
+        [data-or-theme="dark"] .text-3xl,
+        [data-or-theme="dark"] .text-4xl {
+          color: #f8fafc !important;
         }
         [data-or-theme="dark"].bg-slate-50,
         [data-or-theme="dark"] .bg-slate-50 {
@@ -4462,7 +4482,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4v · dark mode under More</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4w · dark mode text contrast</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
