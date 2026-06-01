@@ -265,6 +265,7 @@ export default function ORPlannerApp() {
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("or-planner-theme") === "dark");
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
@@ -471,6 +472,11 @@ export default function ORPlannerApp() {
   useEffect(() => {
     localStorage.setItem("or-planner-layout-mode", layoutMode);
   }, [layoutMode]);
+
+  useEffect(() => {
+    localStorage.setItem("or-planner-theme", darkMode ? "dark" : "light");
+    document.documentElement.style.colorScheme = darkMode ? "dark" : "light";
+  }, [darkMode]);
 
   const getPlannerSnapshot = () => ({
     plannerTitle,
@@ -3210,9 +3216,90 @@ export default function ORPlannerApp() {
 
   return (
     <div
+      data-or-theme={darkMode ? "dark" : "light"}
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
       style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent", overscrollBehaviorY: "auto" }}
     >
+      <style>{`
+        [data-or-theme="dark"] {
+          color-scheme: dark;
+        }
+        [data-or-theme="dark"].bg-slate-50,
+        [data-or-theme="dark"] .bg-slate-50 {
+          background-color: #0f172a !important;
+        }
+        [data-or-theme="dark"] .bg-white {
+          background-color: #1e293b !important;
+        }
+        [data-or-theme="dark"] .bg-slate-100 {
+          background-color: #334155 !important;
+        }
+        [data-or-theme="dark"] .bg-slate-50 {
+          background-color: #273449 !important;
+        }
+        [data-or-theme="dark"] .bg-blue-50 {
+          background-color: rgba(30, 64, 175, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-green-50 {
+          background-color: rgba(22, 101, 52, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-amber-50,
+        [data-or-theme="dark"] .bg-yellow-50 {
+          background-color: rgba(146, 64, 14, 0.28) !important;
+        }
+        [data-or-theme="dark"] .bg-red-50 {
+          background-color: rgba(127, 29, 29, 0.30) !important;
+        }
+        [data-or-theme="dark"] .text-slate-900,
+        [data-or-theme="dark"] .text-slate-800,
+        [data-or-theme="dark"] .text-slate-700 {
+          color: #f8fafc !important;
+        }
+        [data-or-theme="dark"] .text-slate-600,
+        [data-or-theme="dark"] .text-slate-500,
+        [data-or-theme="dark"] .text-slate-400 {
+          color: #cbd5e1 !important;
+        }
+        [data-or-theme="dark"] .text-blue-800,
+        [data-or-theme="dark"] .text-blue-700 {
+          color: #bfdbfe !important;
+        }
+        [data-or-theme="dark"] .text-green-800,
+        [data-or-theme="dark"] .text-green-700 {
+          color: #bbf7d0 !important;
+        }
+        [data-or-theme="dark"] .text-amber-800,
+        [data-or-theme="dark"] .text-yellow-800 {
+          color: #fde68a !important;
+        }
+        [data-or-theme="dark"] .text-red-800,
+        [data-or-theme="dark"] .text-red-700 {
+          color: #fecaca !important;
+        }
+        [data-or-theme="dark"] .border-slate-200 {
+          border-color: #475569 !important;
+        }
+        [data-or-theme="dark"] .ring-slate-200 {
+          --tw-ring-color: #475569 !important;
+        }
+        [data-or-theme="dark"] input,
+        [data-or-theme="dark"] select,
+        [data-or-theme="dark"] textarea,
+        [data-or-theme="dark"] .input {
+          background-color: #1e293b !important;
+          color: #f8fafc !important;
+          border-color: #475569 !important;
+        }
+        [data-or-theme="dark"] input::placeholder,
+        [data-or-theme="dark"] textarea::placeholder {
+          color: #94a3b8 !important;
+        }
+        [data-or-theme="dark"] .shadow-sm,
+        [data-or-theme="dark"] .shadow-lg,
+        [data-or-theme="dark"] .shadow-xl {
+          box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
+        }
+      `}</style>
       <div className="mx-auto max-w-7xl space-y-4">
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -3250,6 +3337,7 @@ export default function ORPlannerApp() {
                     <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
                   </label>
                   <button onClick={() => { setShowMobileActions(false); setShowCancelledFuCasesModal(true); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><ClipboardList className="mr-2 h-4 w-4" /> Cancelled F/U Cases</button>
+                  <button onClick={() => { setDarkMode((prev) => !prev); setShowMobileActions(false); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="mr-2 inline-flex h-4 w-4 items-center justify-center text-base leading-none">{darkMode ? "☀" : "☾"}</span> {darkMode ? "Light Mode" : "Dark Mode"}</button>
                   <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
                 </div>
               )}
@@ -4374,7 +4462,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4u · reliable mobile swipe to Cancelled F/U</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4v · dark mode under More</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
