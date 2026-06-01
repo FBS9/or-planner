@@ -1193,6 +1193,51 @@ export default function ORPlannerApp() {
     return typed;
   };
 
+  const procedureOptionsForCaseDraft = (draft) => {
+    if (!draft) return [];
+    const specialty = normalizeProcedureSearch(getSurgeonSpecialty(surgeonRosters, draft.facility, draft.surgeon));
+    const query = normalizeProcedureSearch(draft.procedure || "");
+
+    const scored = procedureRosterItems
+      .filter((item) => item?.procedure && !isProcedureHiddenFromRoster(item.procedure))
+      .map((item) => {
+        const itemSpecialty = normalizeProcedureSearch(item.specialty || "");
+        const sameSpecialty = specialty && itemSpecialty && specialty === itemSpecialty;
+        const procedureKey = normalizeProcedureSearch(item.procedure);
+        const queryMatch = query && procedureKey.includes(query);
+        const score = query ? Math.max(sfProcedureScore(item.procedure, draft.procedure), queryMatch ? 0.92 : 0) : 0;
+        return { ...item, sameSpecialty, score };
+      })
+      .filter((item) => !query || item.score >= 0.35 || normalizeProcedureSearch(item.procedure).includes(query))
+      .sort((a, b) => {
+        if (a.sameSpecialty !== b.sameSpecialty) return a.sameSpecialty ? -1 : 1;
+        if (b.score !== a.score) return b.score - a.score;
+        if ((b.count || 0) !== (a.count || 0)) return (b.count || 0) - (a.count || 0);
+        return a.procedure.localeCompare(b.procedure);
+      });
+
+    const seen = new Set();
+    return scored.filter((item) => {
+      const key = normalizeProcedureSearch(item.procedure);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 50);
+  };
+
+  const filteredReviewProcedureOptions = useMemo(() => procedureOptionsForCaseDraft(reviewDraft), [reviewDraft, procedureRosterItems, surgeonRosters, procedureExclusionKeys]);
+
+  const resolveReviewDraftProcedure = (draft) => {
+    const typed = normalizeSfText(draft?.procedure);
+    if (!typed) return "";
+    const options = procedureOptionsForCaseDraft(draft);
+    const exact = options.find((item) => normalizeProcedureSearch(item.procedure) === normalizeProcedureSearch(typed));
+    if (exact) return exact.procedure;
+    if (options.length === 1 && options[0].score >= 0.75) return options[0].procedure;
+    if (options[0]?.score >= 0.92) return options[0].procedure;
+    return typed;
+  };
+
   const selectFacilityAndMoveToSurgeon = (facility) => {
     syncActiveFacility(facility);
     window.setTimeout(() => {
@@ -1287,10 +1332,11 @@ export default function ORPlannerApp() {
   const saveReviewCase = (overrides = {}) => {
     if (!selectedReviewCase || !reviewDraft) return;
     const nextDraft = { ...reviewDraft, ...overrides };
+    const finalDraft = { ...nextDraft, procedure: resolveReviewDraftProcedure(nextDraft) };
     setCasesByDate((prev) => ({
       ...prev,
       [selectedReviewCase.dateKey]: (prev[selectedReviewCase.dateKey] || []).map((c) =>
-        c.id === selectedReviewCase.id ? { ...c, ...nextDraft, date: selectedReviewCase.dateKey } : c
+        c.id === selectedReviewCase.id ? { ...c, ...finalDraft, date: selectedReviewCase.dateKey } : c
       ),
     }));
     closeUnreconciledCaseEditor();
@@ -2214,6 +2260,50 @@ export default function ORPlannerApp() {
     setSfApplySummary(`Remembered ${sourceProcedure} as procedure roster item ${canonicalProcedure}. Future Salesforce imports will use that procedure name.`);
   };
 
+  const sfSelectOneTimeProcedureForRow = (row, rosterProcedureName) => {
+    const canonicalProcedure = normalizeSfText(rosterProcedureName);
+    if (!row?.id || !canonicalProcedure) return;
+
+    updateSalesforceRow(row.id, {
+      procedure: canonicalProcedure,
+      procedureRosterMatchedName: canonicalProcedure,
+      procedureCanonicalizedFrom: "",
+      actionManuallyEdited: false,
+    });
+    setSfApplySummary(`Selected ${canonicalProcedure} for this Salesforce row only. Blank Salesforce procedure rows will not learn an automatic procedure alias.`);
+  };
+
+  const sfAddOneTimeProcedureForRow = (row) => {
+    const procedure = normalizeSfText(row?.newProcedureRosterName);
+    if (!row?.id || !procedure) return;
+
+    const specialty = normalizeSfText(
+      row?.newProcedureRosterSpecialty ||
+      row?.rosterSurgeonSubspecialty ||
+      row?.category ||
+      getSurgeonSpecialty(surgeonRosters, row?.facility, row?.surgeon) ||
+      "Unassigned"
+    ) || "Unassigned";
+
+    const key = `${normalizeProcedureSearch(specialty)}::${normalizeProcedureSearch(procedure)}`;
+    setManualProcedureRosterItems((prev) => {
+      const existing = new Set((prev || []).map((item) => `${normalizeProcedureSearch(item?.specialty || "Unassigned")}::${normalizeProcedureSearch(item?.procedure || "")}`));
+      if (existing.has(key)) return prev;
+      return [...(prev || []), { procedure, specialty }];
+    });
+    setProcedureExclusions((prev) => (prev || []).filter((entry) => normalizeProcedureSearch(typeof entry === "string" ? entry : entry?.procedure) !== normalizeProcedureSearch(procedure)));
+
+    updateSalesforceRow(row.id, {
+      procedure,
+      procedureRosterMatchedName: procedure,
+      procedureCanonicalizedFrom: "",
+      newProcedureRosterName: "",
+      newProcedureRosterSpecialty: specialty,
+      actionManuallyEdited: false,
+    });
+    setSfApplySummary(`Added ${procedure} to the ${specialty} procedure roster and selected it for this row only.`);
+  };
+
   const sfFlattenPlannerCases = () =>
     Object.entries(casesByDate).flatMap(([dateKey, dateCases]) =>
       (dateCases || []).map((item) => ({ ...item, displayDateKey: dateKey }))
@@ -2272,6 +2362,17 @@ export default function ORPlannerApp() {
     if (mode === "reconcile") {
       if (plannerCase.fastTracking && identityMatches && score >= 80) status = "Match";
       else if (plannerCase.fastTracking && identityMatches && score >= 65) status = "Possible Match";
+    } else if (mode === "scheduled") {
+      // Scheduled Procedures screenshots are future schedule imports.
+      // A duplicate requires an exact time match. Same date/facility/surgeon/procedure
+      // at a different time is a different scheduled case and should import as new FT.
+      if (identityMatches && hasBothTimes && timeDiff === 0 && score >= 80) {
+        status = "Match";
+      } else if (identityMatches && !hasBothTimes && score >= 65) {
+        status = "Possible Match";
+      } else {
+        status = "No Match";
+      }
     } else {
       if (identityMatches && (timeIsTight || !hasBothTimes) && score >= 80) status = "Match";
       else if (identityMatches && score >= 65) status = "Possible Match";
@@ -2363,7 +2464,7 @@ export default function ORPlannerApp() {
     const screenshotKey = normalizeSfKey(screenshotType);
     const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
     const isScheduledProceduresRow = screenshotKey.includes("scheduled procedures") || recommendedKey.includes("import new fast tracking");
-    const matchMode = suggestedAction === "markReconciled" ? "reconcile" : "normal";
+    const matchMode = isScheduledProceduresRow ? "scheduled" : suggestedAction === "markReconciled" ? "reconcile" : "normal";
     const matches = sfGetPlannerMatches(baseRow, matchMode).filter((match) => !reservedPlannerCaseIds.has(match.plannerCase.id));
     const bestMatch = matches[0];
 
@@ -2440,23 +2541,79 @@ export default function ORPlannerApp() {
     };
   };
 
+  const sfPlannerCaseIdUsedByRow = (row) => {
+    if (!row) return "";
+    if (row.selectedPlannerCaseId) return row.selectedPlannerCaseId;
+    if (row.matchedPlannerCaseId) return row.matchedPlannerCaseId;
+    return "";
+  };
+
+  const sfGetReservedPlannerCaseIds = (exceptRowId = "") => {
+    const reserved = new Set();
+
+    (sfExtractedCases || []).forEach((row) => {
+      if (!row || row.id === exceptRowId) return;
+      const plannerCaseId = sfPlannerCaseIdUsedByRow(row);
+      if (plannerCaseId) reserved.add(plannerCaseId);
+    });
+
+    return reserved;
+  };
+
   const sfResolveRowsWithUniquePlannerMatches = (rows, screenshotType) => {
-    const reservedPlannerCaseIds = new Set();
+    // Manual choices should win. Reserve them before auto-matching the rest of
+    // the Salesforce rows so one OR Planner case cannot be reused elsewhere.
+    const reservedPlannerCaseIds = new Set(
+      (rows || [])
+        .filter((row) => row?.actionManuallyEdited && row?.selectedPlannerCaseId)
+        .map((row) => row.selectedPlannerCaseId)
+    );
 
     return rows.map((row) => {
-      if (row.actionManuallyEdited) return row;
+      if (row.actionManuallyEdited) {
+        const plannerCaseId = sfPlannerCaseIdUsedByRow(row);
+        if (plannerCaseId) reservedPlannerCaseIds.add(plannerCaseId);
+        return row;
+      }
 
       const resolved = sfResolveRowReviewState(row, screenshotType, reservedPlannerCaseIds);
       const updated = { ...row, ...resolved };
 
       // One existing OR Planner case can only satisfy one Salesforce row.
-      // This prevents two identical Salesforce rows from both being marked
-      // Ignore/No Duplicate when only one matching planner case exists.
-      if (resolved.matchedPlannerCaseId) {
-        reservedPlannerCaseIds.add(resolved.matchedPlannerCaseId);
+      // This prevents two Salesforce rows from sharing the same matched case
+      // in badges, actions, or manual matching dropdowns during this review.
+      const plannerCaseId = sfPlannerCaseIdUsedByRow(updated);
+      if (plannerCaseId) {
+        reservedPlannerCaseIds.add(plannerCaseId);
       }
 
       return updated;
+    });
+  };
+
+  const sfInferFacilityForAccountSnippetRows = (rows, screenshotType) => {
+    const screenshotKey = normalizeSfKey(screenshotType);
+    if (!screenshotKey.includes("account procedure history")) return rows;
+
+    const fixedFacilities = Array.from(new Set((rows || [])
+      .filter((row) => row.facility && row.facilitySource !== "surgeon_roster_multiple")
+      .map((row) => row.facility)
+      .filter(Boolean)));
+
+    if (fixedFacilities.length !== 1) return rows;
+
+    const inferredFacility = fixedFacilities[0];
+
+    return rows.map((row) => {
+      if (row.facility) return row;
+      const options = Array.isArray(row.facilityOptions) ? row.facilityOptions : [];
+      if (!options.includes(inferredFacility)) return row;
+      return {
+        ...row,
+        facility: inferredFacility,
+        facilitySource: "batch_inferred_account",
+        facilityCanonicalizedFrom: "",
+      };
     });
   };
 
@@ -2477,6 +2634,7 @@ export default function ORPlannerApp() {
         category: normalizeSfText(item.category),
         procedure: normalizeSfText(item.procedure),
         sourceProcedureName: normalizeSfText(item.procedure),
+        procedureWasBlankInSalesforce: !normalizeSfText(item.procedure),
         surgeon,
         sourceSurgeonName: surgeon,
         rosterSurgeonName: surgeon,
@@ -2492,7 +2650,8 @@ export default function ORPlannerApp() {
       return sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawBaseRow));
     });
 
-    return sfResolveRowsWithUniquePlannerMatches(baseRows, screenshotType);
+    const facilityResolvedRows = sfInferFacilityForAccountSnippetRows(baseRows, screenshotType);
+    return sfResolveRowsWithUniquePlannerMatches(facilityResolvedRows, screenshotType);
   };
 
   useEffect(() => {
@@ -2526,14 +2685,31 @@ export default function ORPlannerApp() {
 
   const updateSalesforceRow = (id, patch) => {
     const manuallyEdited = Object.prototype.hasOwnProperty.call(patch, "action");
+    const selectedFacility = Object.prototype.hasOwnProperty.call(patch, "facility") ? normalizeSfText(patch.facility) : "";
+    const isAccountHistoryImport = normalizeSfKey(sfScreenshotType).includes("account procedure history");
+
     setSfExtractedCases((prev) => {
       const patchedRows = prev.map((item) => {
-        if (item.id !== id) return item;
+        const shouldPatchThisRow = item.id === id;
+        const options = Array.isArray(item.facilityOptions) ? item.facilityOptions : [];
+        const shouldBatchPatchFacility = Boolean(
+          !shouldPatchThisRow &&
+          isAccountHistoryImport &&
+          selectedFacility &&
+          options.includes(selectedFacility) &&
+          (!item.facility || item.facilitySource === "surgeon_roster_multiple")
+        );
+
+        if (!shouldPatchThisRow && !shouldBatchPatchFacility) return item;
+
+        const rowPatch = shouldBatchPatchFacility
+          ? { facility: selectedFacility, facilitySource: "batch_selected_account", facilityCanonicalizedFrom: "" }
+          : patch;
 
         const rawPatched = {
           ...item,
-          ...patch,
-          actionManuallyEdited: manuallyEdited ? true : item.actionManuallyEdited,
+          ...rowPatch,
+          actionManuallyEdited: shouldPatchThisRow && manuallyEdited ? true : item.actionManuallyEdited,
         };
 
         return sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow(rawPatched));
@@ -2550,7 +2726,12 @@ export default function ORPlannerApp() {
 
   const getSfPlannerCaseOptions = (sfCase) => {
     const mode = sfCase.action === "markReconciled" ? "reconcile" : "normal";
-    const matches = sfGetPlannerMatches(sfCase, mode);
+    const reservedByOtherRows = sfGetReservedPlannerCaseIds(sfCase.id);
+    const currentSelectedId = sfCase.selectedPlannerCaseId || "";
+    const removeUsedByOtherRows = (matches) =>
+      matches.filter((match) => !reservedByOtherRows.has(match.plannerCase.id) || match.plannerCase.id === currentSelectedId);
+
+    const matches = removeUsedByOtherRows(sfGetPlannerMatches(sfCase, mode));
 
     if (sfCase.action === "markReconciled") {
       const filtered = matches.filter((match) =>
@@ -2829,29 +3010,12 @@ export default function ORPlannerApp() {
     }
   };
 
-  const showPullToRefreshHint = pullRefreshState !== "idle";
-  const pullToRefreshLabel = pullRefreshState === "refreshing" ? "Syncing cloud..." : pullRefreshState === "ready" ? "Release to sync cloud" : "Pull to sync cloud";
-
   return (
     <div
       className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 p-3 md:p-6"
-      style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent" }}
-      onTouchStart={handlePullRefreshStart}
-      onTouchMove={handlePullRefreshMove}
-      onTouchEnd={handlePullRefreshEnd}
-      onTouchCancel={() => {
-        pullRefreshArmedRef.current = false;
-        pullRefreshStartYRef.current = null;
-        setPullRefreshState("idle");
-        setPullRefreshDistance(0);
-      }}
+      style={{ overflowAnchor: "none", WebkitTapHighlightColor: "transparent", overscrollBehaviorY: "auto" }}
     >
       <div className="mx-auto max-w-7xl space-y-4">
-        {showPullToRefreshHint && (
-          <div className="pointer-events-none fixed left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-extrabold text-white shadow-lg ring-1 ring-slate-800">
-            {pullToRefreshLabel}
-          </div>
-        )}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
@@ -3777,7 +3941,31 @@ export default function ORPlannerApp() {
 
               <label className="block">
                 <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Procedure</span>
-                <input value={reviewDraft.procedure} onChange={(e) => updateReviewDraft({ procedure: e.target.value })} placeholder="Procedure" className="input" />
+                <input
+                  value={reviewDraft.procedure}
+                  onChange={(e) => updateReviewDraft({ procedure: e.target.value })}
+                  onBlur={() => updateReviewDraft({ procedure: resolveReviewDraftProcedure(reviewDraft) })}
+                  list="review-case-procedure-list"
+                  placeholder="Type procedure"
+                  className="input"
+                />
+                <datalist id="review-case-procedure-list">
+                  {filteredReviewProcedureOptions.map((item) => (
+                    <option key={`${item.specialty}-${item.procedure}`} value={item.procedure} />
+                  ))}
+                </datalist>
+                {filteredReviewProcedureOptions.length > 0 && (
+                  <select
+                    value={filteredReviewProcedureOptions.some((item) => normalizeProcedureSearch(item.procedure) === normalizeProcedureSearch(reviewDraft.procedure)) ? reviewDraft.procedure : ""}
+                    onChange={(e) => updateReviewDraft({ procedure: e.target.value })}
+                    className="input mt-2 bg-white text-sm"
+                  >
+                    <option value="">Closest saved procedure matches</option>
+                    {filteredReviewProcedureOptions.map((item) => (
+                      <option key={`review-${item.specialty}-${item.procedure}`} value={item.procedure}>{item.procedure}{item.specialty ? ` · ${item.specialty}` : ""}</option>
+                    ))}
+                  </select>
+                )}
               </label>
 
               <label className="block">
@@ -3818,7 +4006,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4j · add procedure roster plus</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4o · unique manual match options</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -3934,8 +4122,10 @@ export default function ORPlannerApp() {
                         const selectedSurgeonIsInRoster = surgeonRosterOptions.some((surgeon) => normalizeSurgeonSearch(surgeon?.name || "") === normalizeSurgeonSearch(item.surgeon || ""));
                         const selectedProcedureIsInRoster = procedureRosterOptions.some((procedureItem) => normalizeProcedureSearch(procedureItem.procedure) === normalizeProcedureSearch(item.procedure || ""));
                         const needsMissingSurgeonPrompt = Boolean(item.surgeon && item.facility && !sfSurgeonExistsInFacility(item.facility, item.surgeon));
-                        const rosterEditOpen = needsMissingSurgeonPrompt || sfRosterEditRowIds.includes(item.id);
-                        const canEditRosterMapping = Boolean((item.facility && item.surgeon && surgeonRosterOptions.length > 0) || (item.procedure && procedureRosterOptions.length > 0));
+                        const isScheduledProcedureRow = normalizeSfKey(sfScreenshotType).includes("scheduled procedures") || normalizeSfKey(item.recommendedAction).includes("import new fast tracking");
+                        const needsBlankScheduledProcedurePicker = Boolean(isScheduledProcedureRow && item.procedureWasBlankInSalesforce);
+                        const rosterEditOpen = needsMissingSurgeonPrompt || needsBlankScheduledProcedurePicker || sfRosterEditRowIds.includes(item.id);
+                        const canEditRosterMapping = Boolean((item.facility && item.surgeon && surgeonRosterOptions.length > 0) || (item.procedure && procedureRosterOptions.length > 0) || needsBlankScheduledProcedurePicker);
                         return (
                         <div key={item.id} className="rounded-3xl bg-white p-4 text-sm text-slate-700 ring-1 ring-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3957,6 +4147,8 @@ export default function ORPlannerApp() {
                               <span className="font-bold">Facility:</span> {item.facility || (item.facilityOptions?.length > 1 ? "Select below" : "—")}
                               {item.facilitySource === "surgeon_roster" && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">from surgeon roster</span>}
                               {item.facilitySource === "matched_facility_roster" && item.facilityCanonicalizedFrom && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">matched facility roster: {item.facilityCanonicalizedFrom}</span>}
+                              {item.facilitySource === "batch_inferred_account" && <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">inferred from account list</span>}
+                              {item.facilitySource === "batch_selected_account" && <span className="ml-2 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-bold text-green-700">applied to account list</span>}
                               {item.facilityOptions?.length > 1 && <span className="ml-2 rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-bold text-yellow-800">multiple affiliations</span>}
                             </div>
                             <div>
@@ -4029,12 +4221,12 @@ export default function ORPlannerApp() {
                               </label>
                             )}
 
-                            {rosterEditOpen && item.procedure && procedureRosterOptions.length > 0 && (
+                            {rosterEditOpen && (item.procedure || needsBlankScheduledProcedurePicker) && procedureRosterOptions.length > 0 && (
                               <label className="block">
                                 <span className="mb-1 block text-xs font-bold text-slate-500">Use saved procedure</span>
                                 <select
                                   value={selectedProcedureIsInRoster ? item.procedure : ""}
-                                  onChange={(event) => sfSelectExistingProcedureForRow(item, event.target.value)}
+                                  onChange={(event) => needsBlankScheduledProcedurePicker ? sfSelectOneTimeProcedureForRow(item, event.target.value) : sfSelectExistingProcedureForRow(item, event.target.value)}
                                   className="input bg-white"
                                 >
                                   <option value="">Choose procedure roster item</option>
@@ -4042,10 +4234,47 @@ export default function ORPlannerApp() {
                                     <option key={`${item.id}-procedure-${procedureItem.specialty}-${procedureItem.procedure}`} value={procedureItem.procedure}>{procedureItem.procedure}{procedureItem.specialty ? ` · ${procedureItem.specialty}` : ""}</option>
                                   ))}
                                 </select>
-                                {!selectedProcedureIsInRoster && (
+                                {needsBlankScheduledProcedurePicker ? (
+                                  <span className="mt-1 block text-[11px] font-semibold text-slate-500">Salesforce left this procedure blank. This selection is for this row only and will not be remembered as a blank-procedure alias.</span>
+                                ) : !selectedProcedureIsInRoster && (
                                   <span className="mt-1 block text-[11px] font-semibold text-slate-500">Selecting one remembers this Salesforce procedure wording for future imports.</span>
                                 )}
                               </label>
+                            )}
+
+                            {rosterEditOpen && needsBlankScheduledProcedurePicker && (
+                              <div className="rounded-2xl bg-white p-3 text-xs ring-1 ring-slate-200 md:col-span-2">
+                                <div className="font-bold text-slate-700">Add new procedure for this row</div>
+                                <div className="mt-1 text-slate-500">Use this when the procedure was blank in Salesforce but you know what case it should be. It adds the procedure to your roster, but does not teach the app that blank means this procedure.</div>
+                                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_220px_auto] md:items-end">
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Procedure name</span>
+                                    <input
+                                      value={item.newProcedureRosterName || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { newProcedureRosterName: event.target.value })}
+                                      placeholder="Example: Paraesophageal"
+                                      className="input bg-white text-sm"
+                                    />
+                                  </label>
+                                  <label className="block">
+                                    <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Specialty</span>
+                                    <input
+                                      value={item.newProcedureRosterSpecialty || item.rosterSurgeonSubspecialty || item.category || getSurgeonSpecialty(surgeonRosters, item.facility, item.surgeon) || ""}
+                                      onChange={(event) => updateSalesforceRow(item.id, { newProcedureRosterSpecialty: event.target.value })}
+                                      placeholder="Ex: General Surgeon"
+                                      className="input bg-white text-sm"
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => sfAddOneTimeProcedureForRow(item)}
+                                    disabled={!normalizeSfText(item.newProcedureRosterName)}
+                                    className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Add + Use
+                                  </button>
+                                </div>
+                              </div>
                             )}
 
                             {(!item.surgeon || !item.procedure) && item.dateKey && (
