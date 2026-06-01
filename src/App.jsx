@@ -3216,7 +3216,6 @@ export default function ORPlannerApp() {
                     <input type="file" accept="application/json" onChange={(e) => { setShowMobileActions(false); importJson(e); }} className="hidden" />
                   </label>
                   <button onClick={() => { setShowMobileActions(false); setShowCancelledFuCasesModal(true); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><ClipboardList className="mr-2 h-4 w-4" /> Cancelled F/U Cases</button>
-                  <button onClick={() => { setShowMobileActions(false); openFtUnreconciledWeekReview(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><CheckCircle2 className="mr-2 h-4 w-4" /> Move FT Unrec Week</button>
                   <button onClick={() => { setShowMobileActions(false); resetSelectedDay(); }} className="flex items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"><RotateCcw className="mr-2 h-4 w-4" /> Clear Day</button>
                 </div>
               )}
@@ -3919,6 +3918,21 @@ export default function ORPlannerApp() {
           <Card className="rounded-3xl shadow-sm">
             <CardContent className="p-3 md:p-4">
               <div className="space-y-3">
+                <div className="flex flex-col gap-2 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-amber-900">Cancelled F/U cleanup</div>
+                    <div className="text-xs text-amber-800">Review FT checked + Rec unchecked cases for this week.</div>
+                  </div>
+                  <button
+                    onClick={openFtUnreconciledWeekReview}
+                    disabled={ftUnreconciledWeekCases.length === 0}
+                    className="inline-flex min-h-10 items-center justify-center rounded-2xl bg-white px-4 py-2 text-sm font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Review FT Unrec Week
+                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900 ring-1 ring-amber-200">{ftUnreconciledWeekCases.length}</span>
+                  </button>
+                </div>
+
                 {activeStatReportType && (
                 <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
                   <div className="mt-8 w-full max-w-2xl rounded-3xl bg-white p-4 shadow-xl ring-1 ring-slate-200">
@@ -4024,10 +4038,18 @@ export default function ORPlannerApp() {
                         </div>
                       </button>
 
-                      <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-2">
+                      <div className="mt-3 grid grid-cols-[1fr_1fr_1fr_auto_auto] items-center gap-2">
                         <CompactCheck label="FT" checked={c.fastTracking} onChange={(value) => updateCase(c.id, { fastTracking: value })} />
                         <CompactCheck label="Rec" checked={c.reconciled} onChange={(value) => value ? requestReconcileCase(selectedDate, c) : updateCase(c.id, { reconciled: value })} />
                         <CompactCheck label="Growth" checked={c.growth} onChange={(value) => updateCase(c.id, { growth: value })} />
+                        <button
+                          onClick={() => setPendingCancelledFuCase({ dateKey: selectedDate, caseItem: c })}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-amber-600 ring-1 ring-amber-100 hover:bg-amber-50"
+                          aria-label="Move case to Cancelled F/U"
+                          title="Move to Cancelled F/U"
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                        </button>
                         <button onClick={() => deleteCase(c.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Delete case"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </motion.div>
@@ -4309,7 +4331,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4r · fix case edit modal</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4t · bulk Cancelled F/U near cases</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
