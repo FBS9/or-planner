@@ -234,6 +234,7 @@ export default function ORPlannerApp() {
   const [search, setSearch] = useState("");
   const [caseTemplateProcedure, setCaseTemplateProcedure] = useState("");
   const [caseTemplateSurgeon, setCaseTemplateSurgeon] = useState("");
+  const [showAddSurgeonSuggestions, setShowAddSurgeonSuggestions] = useState(false);
   const [caseTemplateTime, setCaseTemplateTime] = useState("");
   const [caseQuantity, setCaseQuantity] = useState(1);
   const [showMobileAddCase, setShowMobileAddCase] = useState(false);
@@ -1406,6 +1407,23 @@ export default function ORPlannerApp() {
     if (exact) return exact;
     if (addSurgerySurgeonOptions.length === 1) return addSurgerySurgeonOptions[0];
     return typed;
+  };
+
+  useEffect(() => {
+    if (!caseTemplateSurgeon.trim()) return;
+    const allSurgeons = getSurgeonNames(surgeonRosters, addSurgeryFacility);
+    const selectedStillExists = allSurgeons.some((surgeon) => normalizeSurgeonSearch(surgeon) === normalizeSurgeonSearch(caseTemplateSurgeon));
+    if (!selectedStillExists) {
+      setCaseTemplateSurgeon("");
+      setCaseTemplateProcedure("");
+      setShowAddSurgeonSuggestions(false);
+    }
+  }, [addSurgeryFacility, surgeonRosters]);
+
+  const selectAddSurgerySurgeon = (surgeon) => {
+    setCaseTemplateSurgeon(surgeon);
+    setShowAddSurgeonSuggestions(false);
+    window.setTimeout(() => procedureInputRef.current?.focus?.(), 0);
   };
 
   const addSurgerySpecialty = getSurgeonSpecialty(surgeonRosters, addSurgeryFacility, resolveCaseTemplateSurgeon());
@@ -4228,7 +4246,10 @@ export default function ORPlannerApp() {
                     id="add-surgery-surgeon-mobile"
                     ref={mobileSurgeonInputRef}
                     value={caseTemplateSurgeon}
-                    onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
+                    onChange={(e) => {
+                      setCaseTemplateSurgeon(e.target.value);
+                      setCaseTemplateProcedure("");
+                    }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); selectSurgeonAndMoveToProcedure(); } }}
                     className={`input ${mobileOnlyClass}`}
                     disabled={facilities.length === 0}
@@ -4239,27 +4260,51 @@ export default function ORPlannerApp() {
                     ))}
                   </select>
 
-                  <input
-                    id="add-surgery-surgeon-desktop"
-                    ref={desktopSurgeonInputRef}
-                    value={caseTemplateSurgeon}
-                    onChange={(e) => setCaseTemplateSurgeon(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        selectSurgeonAndMoveToProcedure();
-                      }
-                    }}
-                    list="add-surgery-surgeon-list"
-                    placeholder="Search surgeon"
-                    className={`input ${desktopOnlyClass}`}
-                    disabled={facilities.length === 0}
-                  />
-                  <datalist id="add-surgery-surgeon-list">
-                    {addSurgerySurgeonOptions.map((surgeon) => (
-                      <option key={surgeon} value={surgeon} />
-                    ))}
-                  </datalist>
+                  <div className={`relative ${desktopOnlyClass}`}>
+                    <input
+                      id="add-surgery-surgeon-desktop"
+                      ref={desktopSurgeonInputRef}
+                      value={caseTemplateSurgeon}
+                      onChange={(e) => {
+                        setCaseTemplateSurgeon(e.target.value);
+                        setShowAddSurgeonSuggestions(true);
+                      }}
+                      onFocus={() => setShowAddSurgeonSuggestions(true)}
+                      onBlur={() => window.setTimeout(() => setShowAddSurgeonSuggestions(false), 140)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (addSurgerySurgeonOptions.length === 1) {
+                            selectAddSurgerySurgeon(addSurgerySurgeonOptions[0]);
+                          } else {
+                            selectSurgeonAndMoveToProcedure();
+                          }
+                        }
+                        if (e.key === "Escape") setShowAddSurgeonSuggestions(false);
+                      }}
+                      autoComplete="off"
+                      placeholder="Search surgeon"
+                      className="input"
+                      disabled={facilities.length === 0}
+                    />
+                    {showAddSurgeonSuggestions && addSurgerySurgeonOptions.length > 0 && (
+                      <div className="absolute z-40 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-xl ring-1 ring-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:ring-slate-700">
+                        {addSurgerySurgeonOptions.map((surgeon) => (
+                          <button
+                            key={surgeon}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              selectAddSurgerySurgeon(surgeon);
+                            }}
+                            className="block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
+                          >
+                            {surgeon}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500">Required when quantity is more than 1.</p>
                 </div>
 
@@ -4786,7 +4831,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5b · share FT screenshot</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5c · controlled facility surgeon dropdown</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
