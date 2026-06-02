@@ -1,7 +1,7 @@
 const CACHE_NAME = 'or-planner-cache-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 const STATIC_ASSET_PATH_PREFIXES = ['/assets/'];
-const ACCEPTABLE_RESPONSE_TYPES = new Set(['basic', 'default']);
+const CACHEABLE_RESPONSE_TYPES = new Set(['basic', 'default']);
 
 const isSameOrigin = (url) => url.origin === self.location.origin;
 const isAppShellRequest = (url) => APP_SHELL.includes(url.pathname);
@@ -10,11 +10,12 @@ const isStaticAssetRequest = (url) =>
 const isCacheableRequest = (request, url) =>
   request.method === 'GET' && isSameOrigin(url) && (isAppShellRequest(url) || isStaticAssetRequest(url));
 const isCacheableResponse = (response) =>
-  response && response.ok && ACCEPTABLE_RESPONSE_TYPES.has(response.type);
+  response.ok && CACHEABLE_RESPONSE_TYPES.has(response.type);
 
-const putCache = async (request, response) => {
+const cacheResponse = async (request, response) => {
   const url = new URL(request.url);
   if (!isCacheableRequest(request, url) || !isCacheableResponse(response)) return;
+
   const cache = await caches.open(CACHE_NAME);
   await cache.put(request, response.clone());
 };
@@ -22,7 +23,7 @@ const putCache = async (request, response) => {
 const networkFirst = async (request, fallbackUrl = '/') => {
   try {
     const response = await fetch(request);
-    await putCache(request, response);
+    await cacheResponse(request, response);
     return response;
   } catch (error) {
     const cached = await caches.match(request);
@@ -35,7 +36,7 @@ const cacheFirst = async (request) => {
   if (cached) return cached;
 
   const response = await fetch(request);
-  await putCache(request, response);
+  await cacheResponse(request, response);
   return response;
 };
 
