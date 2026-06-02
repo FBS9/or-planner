@@ -331,6 +331,7 @@ export default function ORPlannerApp() {
   const [showCloudPanel, setShowCloudPanel] = useState(false);
   const [autoCloudReady, setAutoCloudReady] = useState(false);
   const [cloudSyncActivity, setCloudSyncActivity] = useState("Idle");
+  const [cloudConflictUpdatedAt, setCloudConflictUpdatedAt] = useState("");
   const [pullRefreshState, setPullRefreshState] = useState("idle");
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
   const pullRefreshStartYRef = useRef(null);
@@ -861,6 +862,7 @@ export default function ORPlannerApp() {
     lastSavedSnapshotRef.current = "";
     latestLocalCloudSnapshotRef.current = "";
     lastCloudUpdatedAtRef.current = "";
+    setCloudConflictUpdatedAt("");
     localDirtyRef.current = false;
     setCloudStatus("Signed out of cloud sync.");
   };
@@ -965,6 +967,24 @@ export default function ORPlannerApp() {
       .maybeSingle();
   };
 
+  const isCloudTimestampNewerThanBaseline = (cloudUpdatedAt, baselineUpdatedAt) => {
+    if (!cloudUpdatedAt) return false;
+    if (!baselineUpdatedAt) return true;
+
+    const cloudTime = Date.parse(cloudUpdatedAt);
+    const baselineTime = Date.parse(baselineUpdatedAt);
+    if (Number.isNaN(cloudTime) || Number.isNaN(baselineTime)) return cloudUpdatedAt !== baselineUpdatedAt;
+    return cloudTime > baselineTime;
+  };
+
+  const showCloudSaveConflict = (cloudUpdatedAt) => {
+    const conflictTime = cloudUpdatedAt ? new Date(cloudUpdatedAt).toLocaleString() : "a newer cloud version";
+    setCloudConflictUpdatedAt(cloudUpdatedAt || "unknown");
+    setCloudSyncActivity("Conflict");
+    setCloudStatus(`Cloud save blocked because this planner was updated in the cloud at ${conflictTime}. Pull/refresh the latest cloud copy before saving again.`);
+    setShowCloudPanel(true);
+  };
+
   const applyCloudPlannerData = (plannerData, updatedAt, activityLabel = "Synced") => {
     isApplyingCloudRef.current = true;
     applyPlannerSnapshot(plannerData);
@@ -995,24 +1015,48 @@ export default function ORPlannerApp() {
     if (silent && snapshotString === lastSavedSnapshotRef.current) return;
 
     if (!silent) setCloudBusy(true);
+    setCloudSyncActivity("Checking cloud...");
+
+    const expectedUpdatedAt = lastCloudUpdatedAtRef.current || null;
+    const { data: cloudData, error: cloudReadError } = await getCloudRecord();
+
+    if (cloudReadError) {
+      if (!silent) setCloudBusy(false);
+      setCloudSyncActivity("Save failed");
+      setCloudStatus(cloudReadError.message);
+      return;
+    }
+
+    if (isCloudTimestampNewerThanBaseline(cloudData?.updated_at, expectedUpdatedAt)) {
+      if (!silent) setCloudBusy(false);
+      showCloudSaveConflict(cloudData.updated_at);
+      return;
+    }
+
     setCloudSyncActivity("Saving...");
-    const savedAt = new Date().toISOString();
-    const { error } = await supabase.from("or_planner_sync").upsert({
-      user_id: cloudSession.user.id,
-      planner_data: snapshot,
-      updated_at: savedAt,
-    }, { onConflict: "user_id" });
+    const { data: writeResult, error: writeError } = await supabase
+      .rpc("save_or_planner_sync_if_current", {
+        p_expected_updated_at: expectedUpdatedAt,
+        p_planner_data: snapshot,
+      })
+      .single();
     if (!silent) setCloudBusy(false);
 
-    if (error) {
+    if (writeError) {
       setCloudSyncActivity("Save failed");
-      setCloudStatus(error.message);
+      setCloudStatus(`Save blocked: ${writeError.message}`);
+      return;
+    }
+
+    if (!writeResult?.saved) {
+      showCloudSaveConflict(writeResult?.updated_at);
       return;
     }
 
     lastSavedSnapshotRef.current = snapshotString;
     latestLocalCloudSnapshotRef.current = snapshotString;
-    lastCloudUpdatedAtRef.current = savedAt;
+    lastCloudUpdatedAtRef.current = writeResult.updated_at;
+    setCloudConflictUpdatedAt("");
     localDirtyRef.current = false;
     const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
     setCloudSyncActivity("Saved");
@@ -1044,10 +1088,12 @@ export default function ORPlannerApp() {
     if (!data?.planner_data) {
       setCloudSyncActivity("Ready");
       setCloudStatus("No cloud data found yet. Your next change will auto-save to cloud.");
+      setCloudConflictUpdatedAt("");
       setAutoCloudReady(true);
       return;
     }
 
+    setCloudConflictUpdatedAt("");
     applyCloudPlannerData(data.planner_data, data.updated_at, "Synced");
     setCloudStatus(`Auto-pulled cloud data from ${data.updated_at ? new Date(data.updated_at).toLocaleString() : "cloud"}.`);
   };
@@ -3620,10 +3666,19 @@ export default function ORPlannerApp() {
                   <p className="text-sm text-slate-500">Sync this planner across iPhone, iPad, and desktop.</p>
                 </div>
                 {cloudSession ? (
-                  <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
-                    Signed in as <span className="font-semibold text-slate-900">{cloudSession.user.email}</span>
-                    <div className="mt-1 text-xs text-slate-500">{cloudStatus}</div>
-                    <div className="mt-1 text-xs font-semibold text-slate-600">Auto sync: {cloudSyncActivity}</div>
+                  <div className="space-y-2">
+                    <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
+                      Signed in as <span className="font-semibold text-slate-900">{cloudSession.user.email}</span>
+                      <div className="mt-1 text-xs text-slate-500">{cloudStatus}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-600">Auto sync: {cloudSyncActivity}</div>
+                    </div>
+                    {cloudConflictUpdatedAt && (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        <div className="font-bold">Cloud conflict detected</div>
+                        <div className="mt-1 text-xs">A newer cloud copy exists. Pull/refresh the cloud planner before saving from this device.</div>
+                        <Button onClick={pullFromCloud} disabled={cloudBusy} variant="secondary" className="mt-3 rounded-2xl">Pull Latest Cloud Data</Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="grid gap-2 md:grid-cols-2">
