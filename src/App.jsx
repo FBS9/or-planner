@@ -3401,9 +3401,14 @@ export default function ORPlannerApp() {
 
       const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
 
+      const authHeaders = { "Content-Type": "application/json" };
+      if (cloudSession?.access_token) {
+        authHeaders.Authorization = `Bearer ${cloudSession.access_token}`;
+      }
+
       const response = await fetch("/api/extract-salesforce-cases", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({
           imageBase64: base64,
           mimeType: sfFile.type || "image/png",

@@ -1,3 +1,78 @@
+const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const getHeader = (req, name) => {
+  const value = req.headers?.[name.toLowerCase()] || req.headers?.[name];
+  return Array.isArray(value) ? value[0] : value;
+};
+
+const getBearerToken = (req) => {
+  const authorization = getHeader(req, "authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+};
+
+const normalizeImageInput = (imageBase64, requestedMimeType = "image/png") => {
+  if (typeof imageBase64 !== "string" || !imageBase64.trim()) {
+    return { error: "Missing imageBase64." };
+  }
+
+  let mimeType = typeof requestedMimeType === "string" && requestedMimeType.trim()
+    ? requestedMimeType.trim().toLowerCase()
+    : "image/png";
+  let base64 = imageBase64.trim();
+
+  const dataUrlMatch = base64.match(/^data:([^;,]+);base64,(.*)$/is);
+  if (dataUrlMatch) {
+    mimeType = dataUrlMatch[1].trim().toLowerCase();
+    base64 = dataUrlMatch[2].trim();
+  }
+
+  if (!ALLOWED_IMAGE_TYPES.has(mimeType)) {
+    return { error: "Invalid image type" };
+  }
+
+  const compactBase64 = base64.replace(/\s/g, "");
+  const padding = compactBase64.endsWith("==") ? 2 : compactBase64.endsWith("=") ? 1 : 0;
+  const estimatedBytes = Math.floor((compactBase64.length * 3) / 4) - padding;
+
+  if (estimatedBytes > MAX_IMAGE_BYTES) {
+    return { error: "Image too large" };
+  }
+
+  if (!compactBase64 || estimatedBytes <= 0) {
+    return { error: "Missing imageBase64." };
+  }
+
+  return { imageBase64: compactBase64, mimeType };
+};
+
+const isAuthorized = async (req) => {
+  const configuredSecret = process.env.SALESFORCE_EXTRACT_API_SECRET;
+  const providedSecret = getHeader(req, "x-api-secret") || getHeader(req, "x-api-key");
+  const bearerToken = getBearerToken(req);
+
+  if (configuredSecret && (providedSecret === configuredSecret || bearerToken === configuredSecret)) {
+    return true;
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey || !bearerToken || (configuredSecret && bearerToken === configuredSecret)) {
+    return false;
+  }
+
+  const authResponse = await fetch(`${supabaseUrl.replace(/\/$/, "")}/auth/v1/user`, {
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${bearerToken}`,
+    },
+  });
+
+  return authResponse.ok;
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -5,14 +80,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "OPENAI_API_KEY is not configured in Vercel." });
+    const authorized = await isAuthorized(req);
+    if (!authorized) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { imageBase64, mimeType = "image/png" } = req.body || {};
+    const normalizedImage = normalizeImageInput(req.body?.imageBase64, req.body?.mimeType || "image/png");
+    if (normalizedImage.error) {
+      return res.status(400).json({ error: normalizedImage.error });
+    }
 
-    if (!imageBase64) {
-      return res.status(400).json({ error: "Missing imageBase64." });
+    const { imageBase64, mimeType } = normalizedImage;
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "OPENAI_API_KEY is not configured in Vercel." });
     }
 
     const prompt = `
