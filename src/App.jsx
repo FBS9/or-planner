@@ -266,6 +266,29 @@ export default function ORPlannerApp() {
   const [statReportType, setStatReportType] = useState(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("or-planner-theme") === "dark");
+
+  useEffect(() => {
+    const themeColor = darkMode ? "#0f172a" : "#f8fafc";
+    const appleStatusStyle = darkMode ? "black-translucent" : "default";
+    const ensureMeta = (name, attrName = "name") => {
+      let tag = document.querySelector(`meta[${attrName}="${name}"]`);
+      if (!tag) {
+        tag = document.createElement("meta");
+        tag.setAttribute(attrName, name);
+        document.head.appendChild(tag);
+      }
+      return tag;
+    };
+
+    ensureMeta("theme-color").setAttribute("content", themeColor);
+    ensureMeta("apple-mobile-web-app-status-bar-style").setAttribute("content", appleStatusStyle);
+    ensureMeta("mobile-web-app-capable").setAttribute("content", "yes");
+    ensureMeta("apple-mobile-web-app-capable").setAttribute("content", "yes");
+
+    document.documentElement.style.backgroundColor = darkMode ? "#0f172a" : "#f8fafc";
+    document.body.style.backgroundColor = darkMode ? "#0f172a" : "#f8fafc";
+  }, [darkMode]);
+
   const [casesByDate, setCasesByDate] = useState({});
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const sortedFacilities = useMemo(() => [...facilities].sort((a, b) => a.localeCompare(b)), [facilities]);
@@ -3338,6 +3361,20 @@ export default function ORPlannerApp() {
         [data-or-theme="dark"] .bg-yellow-100 .text-yellow-800 {
           color: #fffbeb !important;
         }
+
+        [data-or-theme="dark"] .bg-amber-100 {
+          background-color: #fde68a !important;
+        }
+        [data-or-theme="dark"] .bg-amber-100.text-amber-900,
+        [data-or-theme="dark"] .bg-amber-100 .text-amber-900,
+        [data-or-theme="dark"] .bg-amber-100.text-amber-800,
+        [data-or-theme="dark"] .bg-amber-100 .text-amber-800 {
+          color: #78350f !important;
+        }
+        [data-or-theme="dark"] .ring-amber-200 {
+          border-color: rgba(252, 211, 77, 0.75) !important;
+          --tw-ring-color: rgba(252, 211, 77, 0.75) !important;
+        }
         [data-or-theme="dark"] .bg-blue-100 {
           background-color: rgba(30, 64, 175, 0.72) !important;
         }
@@ -4531,7 +4568,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v4y · dark mode warning contrast</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5a · dark mobile status bar</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
