@@ -264,6 +264,7 @@ export default function ORPlannerApp() {
   const [pendingReconcileCase, setPendingReconcileCase] = useState(null);
   const [showFastTrackedReport, setShowFastTrackedReport] = useState(false);
   const [statReportType, setStatReportType] = useState(null);
+  const [ftShareStatus, setFtShareStatus] = useState("");
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem("or-planner-layout-mode") || "auto");
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("or-planner-theme") === "dark");
 
@@ -482,6 +483,151 @@ export default function ORPlannerApp() {
       }),
     };
   }).filter((day) => day.facilities.length > 0);
+
+  const shareFastTrackedScreenshot = async () => {
+    try {
+      setFtShareStatus("Preparing...");
+      const ftCases = weekDates.flatMap((dateKey) =>
+        (casesByDate[dateKey] || [])
+          .filter((item) => item.fastTracking)
+          .filter((item) => selectedFacility === ALL_FACILITIES || item.facility === selectedFacility)
+          .sort(compareCasesByTime)
+          .map((item) => ({ ...item, displayDateKey: dateKey }))
+      );
+
+      if (ftCases.length === 0) {
+        setFtShareStatus("No FT cases to share.");
+        setTimeout(() => setFtShareStatus(""), 2500);
+        return;
+      }
+
+      const title = `Fast Tracked Cases — Week of ${formatLongDate(weekDates[0])}`;
+      const subtitle = selectedFacility === ALL_FACILITIES ? "All Facilities" : selectedFacility;
+      const lines = [];
+      weekDates.forEach((dateKey) => {
+        const dayCases = ftCases.filter((item) => item.displayDateKey === dateKey);
+        if (!dayCases.length) return;
+        lines.push({ type: "day", text: fromDateKey(dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }) });
+        dayCases.forEach((item) => {
+          const timePart = item.time ? `${item.time} · ` : "";
+          lines.push({ type: "case", text: `${timePart}${item.facility || "No Facility"} · ${item.surgeon || "No Surgeon"} · ${item.procedure || "No Procedure"}` });
+        });
+      });
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const scale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
+      const width = 1200;
+      const margin = 64;
+      const contentWidth = width - margin * 2;
+      const lineHeight = 34;
+      const dayHeight = 48;
+      const wrappedLines = [];
+
+      const wrapText = (text, font, maxWidth) => {
+        ctx.font = font;
+        const words = String(text || "").split(/\s+/).filter(Boolean);
+        const output = [];
+        let current = "";
+        words.forEach((word) => {
+          const next = current ? `${current} ${word}` : word;
+          if (ctx.measureText(next).width <= maxWidth || !current) {
+            current = next;
+          } else {
+            output.push(current);
+            current = word;
+          }
+        });
+        if (current) output.push(current);
+        return output.length ? output : [""];
+      };
+
+      lines.forEach((line) => {
+        if (line.type === "day") {
+          wrappedLines.push({ ...line, height: dayHeight });
+        } else {
+          const font = "28px Arial";
+          const wrapped = wrapText(line.text, font, contentWidth - 34);
+          wrapped.forEach((text, index) => wrappedLines.push({ type: index === 0 ? "case" : "caseWrap", text, height: lineHeight }));
+        }
+      });
+
+      const height = Math.max(640, 180 + wrappedLines.reduce((sum, line) => sum + line.height, 0) + 80);
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = "#0f172a";
+      ctx.font = "bold 44px Arial";
+      ctx.fillText(title, margin, 74);
+      ctx.fillStyle = "#475569";
+      ctx.font = "26px Arial";
+      ctx.fillText(subtitle, margin, 114);
+      ctx.fillStyle = "#2563eb";
+      ctx.font = "bold 24px Arial";
+      ctx.fillText(`${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`, margin, 150);
+
+      let y = 205;
+      wrappedLines.forEach((line) => {
+        if (line.type === "day") {
+          y += 18;
+          ctx.fillStyle = "#dbeafe";
+          ctx.fillRect(margin - 12, y - 30, contentWidth + 24, 44);
+          ctx.fillStyle = "#1e3a8a";
+          ctx.font = "bold 28px Arial";
+          ctx.fillText(line.text, margin, y);
+          y += 34;
+        } else {
+          ctx.fillStyle = "#334155";
+          ctx.font = line.type === "case" ? "28px Arial" : "26px Arial";
+          const prefix = line.type === "case" ? "• " : "  ";
+          ctx.fillText(prefix + line.text, margin + 6, y);
+          y += line.height;
+        }
+      });
+
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "20px Arial";
+      ctx.fillText("Generated from OR Planner", margin, height - 36);
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.95));
+      if (!blob) throw new Error("Could not create image.");
+
+      const filename = `fast-tracked-cases-${weekDates[0]}.png`;
+      const file = new File([blob], filename, { type: "image/png" });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title,
+          text: `${title}\n${subtitle}\n${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`,
+          files: [file],
+        });
+        setFtShareStatus("Shared.");
+      } else if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        setFtShareStatus("Copied image.");
+      } else {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        setFtShareStatus("Downloaded image.");
+      }
+      setTimeout(() => setFtShareStatus(""), 3000);
+    } catch (error) {
+      console.error(error);
+      setFtShareStatus("Share failed.");
+      setTimeout(() => setFtShareStatus(""), 3000);
+    }
+  };
   const isDesktopLayout = layoutMode === "desktop";
   const isMobileLayout = layoutMode === "mobile";
   const mobileOnlyClass = isDesktopLayout ? "hidden" : isMobileLayout ? "block" : "md:hidden";
@@ -4168,8 +4314,20 @@ export default function ORPlannerApp() {
                       <div>
                         <h2 className="text-xl font-bold">{statReportLabels[activeStatReportType]}</h2>
                         <p className="text-sm text-slate-500">{activeStatReportType === "yearTotal" || activeStatReportType === "yearGrowth" ? `Year-to-date through ${formatLongDate(selectedWeekEnd)}` : `Week of ${formatLongDate(weekDates[0])}`}</p>
+                        {ftShareStatus && <p className="mt-1 text-xs font-semibold text-blue-600">{ftShareStatus}</p>}
                       </div>
-                      <button onClick={() => { setShowFastTrackedReport(false); setStatReportType(null); }} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Close</button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {activeStatReportType === "fastTracking" && (
+                          <button
+                            onClick={shareFastTrackedScreenshot}
+                            disabled={statReportCases.length === 0 || ftShareStatus === "Preparing..."}
+                            className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white ring-1 ring-blue-500 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Share Screenshot
+                          </button>
+                        )}
+                        <button onClick={() => { setShowFastTrackedReport(false); setStatReportType(null); }} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200">Close</button>
+                      </div>
                     </div>
 
                     {statReportGroups.length === 0 ? (
@@ -4568,7 +4726,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5a · dark mobile status bar</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5b · share FT screenshot</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
