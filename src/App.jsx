@@ -503,28 +503,53 @@ export default function ORPlannerApp() {
         return;
       }
 
-      const title = `Fast Tracked Cases — Week of ${formatLongDate(weekDates[0])}`;
+      const title = "Fast Tracked Cases";
+      const weekLabel = `Week of ${formatLongDate(weekDates[0])}`;
       const subtitle = selectedFacility === ALL_FACILITIES ? "All Facilities" : selectedFacility;
-      const lines = [];
-      weekDates.forEach((dateKey) => {
-        const dayCases = ftCases.filter((item) => item.displayDateKey === dateKey);
-        if (!dayCases.length) return;
-        lines.push({ type: "day", text: fromDateKey(dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }) });
-        dayCases.forEach((item) => {
-          const timePart = item.time ? `${item.time} · ` : "";
-          lines.push({ type: "case", text: `${timePart}${item.facility || "No Facility"} · ${item.surgeon || "No Surgeon"} · ${item.procedure || "No Procedure"}` });
-        });
-      });
+      const caseCountLabel = `${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`;
 
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       const scale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
-      const width = 1200;
+      const width = 1400;
       const margin = 64;
       const contentWidth = width - margin * 2;
-      const lineHeight = 34;
-      const dayHeight = 48;
-      const wrappedLines = [];
+      const palette = {
+        page: "#f8fafc",
+        card: "#ffffff",
+        ink: "#0f172a",
+        muted: "#64748b",
+        line: "#dbe4ef",
+        blue: "#1d4ed8",
+        blueSoft: "#dbeafe",
+        blueInk: "#1e3a8a",
+        slateSoft: "#f1f5f9",
+        greenSoft: "#dcfce7",
+        greenInk: "#166534",
+      };
+
+      const drawRoundRect = (x, y, w, h, r, fill, stroke = "", lineWidth = 1) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        if (fill) {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
+        if (stroke) {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+        }
+      };
 
       const wrapText = (text, font, maxWidth) => {
         ctx.font = font;
@@ -544,57 +569,148 @@ export default function ORPlannerApp() {
         return output.length ? output : [""];
       };
 
-      lines.forEach((line) => {
-        if (line.type === "day") {
-          wrappedLines.push({ ...line, height: dayHeight });
-        } else {
-          const font = "28px Arial";
-          const wrapped = wrapText(line.text, font, contentWidth - 34);
-          wrapped.forEach((text, index) => wrappedLines.push({ type: index === 0 ? "case" : "caseWrap", text, height: lineHeight }));
-        }
+      const groupedDays = weekDates.map((dateKey) => {
+        const dayCases = ftCases.filter((item) => item.displayDateKey === dateKey);
+        const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
+        return {
+          dateKey,
+          facilities: facilitiesForDay.map((facility) => {
+            const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility).sort(compareCasesByTime);
+            const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
+            return {
+              facility,
+              count: facilityCases.length,
+              surgeons: surgeonsForFacility.map((surgeon) => {
+                const surgeonCases = facilityCases.filter((item) => (item.surgeon || "No Surgeon") === surgeon).sort(compareCasesByTime);
+                return {
+                  surgeon,
+                  count: surgeonCases.length,
+                  procedures: surgeonCases.map((item) => ({
+                    time: item.time || "",
+                    procedure: item.procedure || "No Procedure",
+                  })),
+                };
+              }),
+            };
+          }),
+        };
+      }).filter((day) => day.facilities.length > 0);
+
+      const layout = [];
+      groupedDays.forEach((day) => {
+        const dayLabel = fromDateKey(day.dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+        layout.push({ type: "day", text: dayLabel, height: 58 });
+
+        day.facilities.forEach((facilityGroup) => {
+          layout.push({ type: "facility", text: facilityGroup.facility, count: facilityGroup.count, height: 54 });
+
+          facilityGroup.surgeons.forEach((surgeonGroup) => {
+            layout.push({ type: "surgeon", text: surgeonGroup.surgeon, count: surgeonGroup.count, height: 42 });
+
+            surgeonGroup.procedures.forEach((caseItem) => {
+              const lineText = `${caseItem.time ? `${caseItem.time} — ` : ""}${caseItem.procedure}`;
+              const wrapped = wrapText(lineText, "27px Arial", contentWidth - 146);
+              wrapped.forEach((line, index) => {
+                layout.push({
+                  type: index === 0 ? "procedure" : "procedureWrap",
+                  text: line,
+                  height: 34,
+                });
+              });
+            });
+            layout.push({ type: "surgeonGap", height: 8 });
+          });
+          layout.push({ type: "facilityGap", height: 14 });
+        });
+        layout.push({ type: "dayGap", height: 22 });
       });
 
-      const height = Math.max(640, 180 + wrappedLines.reduce((sum, line) => sum + line.height, 0) + 80);
+      const height = Math.max(780, 238 + layout.reduce((sum, line) => sum + line.height, 0) + 72);
       canvas.width = width * scale;
       canvas.height = height * scale;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.scale(scale, scale);
 
-      ctx.fillStyle = "#f8fafc";
+      ctx.fillStyle = palette.page;
       ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = "#0f172a";
-      ctx.font = "bold 44px Arial";
-      ctx.fillText(title, margin, 74);
-      ctx.fillStyle = "#475569";
-      ctx.font = "26px Arial";
-      ctx.fillText(subtitle, margin, 114);
-      ctx.fillStyle = "#2563eb";
-      ctx.font = "bold 24px Arial";
-      ctx.fillText(`${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`, margin, 150);
 
-      let y = 205;
-      wrappedLines.forEach((line) => {
+      // Header
+      drawRoundRect(margin, 40, contentWidth, 146, 28, palette.card, palette.line, 2);
+      ctx.fillStyle = palette.ink;
+      ctx.font = "bold 52px Arial";
+      ctx.fillText(title, margin + 34, 96);
+      ctx.fillStyle = palette.muted;
+      ctx.font = "28px Arial";
+      ctx.fillText(weekLabel, margin + 34, 134);
+      ctx.fillStyle = palette.blue;
+      ctx.font = "bold 26px Arial";
+      ctx.fillText(`${subtitle} · ${caseCountLabel}`, margin + 34, 170);
+
+      drawRoundRect(width - margin - 250, 76, 206, 62, 31, palette.greenSoft, "", 0);
+      ctx.fillStyle = palette.greenInk;
+      ctx.font = "bold 30px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("FT Summary", width - margin - 147, 116);
+      ctx.textAlign = "left";
+
+      let y = 230;
+      layout.forEach((line) => {
         if (line.type === "day") {
-          y += 18;
-          ctx.fillStyle = "#dbeafe";
-          ctx.fillRect(margin - 12, y - 30, contentWidth + 24, 44);
-          ctx.fillStyle = "#1e3a8a";
-          ctx.font = "bold 28px Arial";
-          ctx.fillText(line.text, margin, y);
-          y += 34;
-        } else {
-          ctx.fillStyle = "#334155";
-          ctx.font = line.type === "case" ? "28px Arial" : "26px Arial";
-          const prefix = line.type === "case" ? "• " : "  ";
-          ctx.fillText(prefix + line.text, margin + 6, y);
+          drawRoundRect(margin, y, contentWidth, 50, 18, palette.blueSoft, "", 0);
+          ctx.fillStyle = palette.blueInk;
+          ctx.font = "bold 30px Arial";
+          ctx.fillText(line.text, margin + 24, y + 34);
           y += line.height;
+          return;
         }
+
+        if (line.type === "facility") {
+          drawRoundRect(margin + 18, y, contentWidth - 36, 46, 16, palette.card, palette.line, 1.5);
+          ctx.fillStyle = palette.ink;
+          ctx.font = "bold 28px Arial";
+          ctx.fillText(line.text, margin + 42, y + 31);
+
+          const countText = `${line.count}`;
+          ctx.font = "bold 20px Arial";
+          const pillW = Math.max(42, ctx.measureText(countText).width + 28);
+          drawRoundRect(width - margin - 56 - pillW, y + 9, pillW, 28, 14, palette.slateSoft, palette.line, 1);
+          ctx.fillStyle = palette.muted;
+          ctx.textAlign = "center";
+          ctx.fillText(countText, width - margin - 56 - pillW / 2, y + 30);
+          ctx.textAlign = "left";
+          y += line.height;
+          return;
+        }
+
+        if (line.type === "surgeon") {
+          ctx.fillStyle = palette.ink;
+          ctx.font = "bold 26px Arial";
+          ctx.fillText(line.text, margin + 64, y + 28);
+          ctx.fillStyle = palette.muted;
+          ctx.font = "20px Arial";
+          ctx.fillText(`${line.count} case${line.count === 1 ? "" : "s"}`, margin + 64 + ctx.measureText(line.text).width + 18, y + 28);
+          y += line.height;
+          return;
+        }
+
+        if (line.type === "procedure" || line.type === "procedureWrap") {
+          ctx.fillStyle = palette.muted;
+          ctx.font = line.type === "procedure" ? "27px Arial" : "25px Arial";
+          const prefix = line.type === "procedure" ? "•" : "";
+          ctx.fillText(prefix, margin + 82, y + 24);
+          ctx.fillStyle = "#334155";
+          ctx.fillText(line.text, margin + 110, y + 24);
+          y += line.height;
+          return;
+        }
+
+        y += line.height;
       });
 
       ctx.fillStyle = "#94a3b8";
-      ctx.font = "20px Arial";
-      ctx.fillText("Generated from OR Planner", margin, height - 36);
+      ctx.font = "22px Arial";
+      ctx.fillText(`Generated from OR Planner · ${new Date().toLocaleDateString()}`, margin, height - 34);
 
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.95));
       if (!blob) throw new Error("Could not create image.");
@@ -604,8 +720,8 @@ export default function ORPlannerApp() {
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
-          title,
-          text: `${title}\n${subtitle}\n${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`,
+          title: `${title} — ${weekLabel}`,
+          text: `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}`,
           files: [file],
         });
         setFtShareStatus("Shared.");
@@ -1045,6 +1161,43 @@ export default function ORPlannerApp() {
       if (!silent) setCloudStatus("Cloud changed since the last sync. Saving this device's latest planner changes now.");
     }
 
+    const markSaveSuccess = (updatedAt) => {
+      lastSavedSnapshotRef.current = snapshotString;
+      latestLocalCloudSnapshotRef.current = snapshotString;
+      lastCloudUpdatedAtRef.current = updatedAt || new Date().toISOString();
+      setCloudConflictUpdatedAt("");
+      localDirtyRef.current = false;
+      const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
+      setCloudSyncActivity("Saved");
+      setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
+    };
+
+    const saveViaDirectUpsert = async () => {
+      const updatedAt = new Date().toISOString();
+      const { data: upsertResult, error: upsertError } = await supabase
+        .from("or_planner_sync")
+        .upsert(
+          {
+            user_id: cloudSession.user.id,
+            planner_data: snapshot,
+            updated_at: updatedAt,
+          },
+          { onConflict: "user_id" }
+        )
+        .select("updated_at")
+        .single();
+
+      if (upsertError) {
+        localDirtyRef.current = true;
+        setCloudSyncActivity("Save failed");
+        setCloudStatus(`Save failed. Local changes are still protected and will retry: ${upsertError.message}`);
+        return false;
+      }
+
+      markSaveSuccess(upsertResult?.updated_at || updatedAt);
+      return true;
+    };
+
     setCloudSyncActivity("Saving...");
     const { data: writeResult, error: writeError } = await supabase
       .rpc("save_or_planner_sync_if_current", {
@@ -1052,14 +1205,31 @@ export default function ORPlannerApp() {
         p_planner_data: snapshot,
       })
       .single();
-    if (!silent) setCloudBusy(false);
 
     if (writeError) {
+      const rpcMissing =
+        writeError.code === "PGRST202" ||
+        String(writeError.message || "").toLowerCase().includes("could not find the function") ||
+        String(writeError.message || "").toLowerCase().includes("schema cache");
+
+      if (rpcMissing) {
+        setCloudSyncActivity("Saving...");
+        const savedWithFallback = await saveViaDirectUpsert();
+        if (!silent) setCloudBusy(false);
+        if (savedWithFallback) {
+          setCloudStatus(`Saved to cloud at ${new Date().toLocaleTimeString()}.`);
+        }
+        return;
+      }
+
+      if (!silent) setCloudBusy(false);
       localDirtyRef.current = true;
       setCloudSyncActivity("Save failed");
       setCloudStatus(`Save failed. Local changes are still protected and will retry: ${writeError.message}`);
       return;
     }
+
+    if (!silent) setCloudBusy(false);
 
     if (!writeResult?.saved) {
       localDirtyRef.current = true;
@@ -1071,14 +1241,7 @@ export default function ORPlannerApp() {
       return;
     }
 
-    lastSavedSnapshotRef.current = snapshotString;
-    latestLocalCloudSnapshotRef.current = snapshotString;
-    lastCloudUpdatedAtRef.current = writeResult.updated_at;
-    setCloudConflictUpdatedAt("");
-    localDirtyRef.current = false;
-    const message = `Saved to cloud at ${new Date().toLocaleTimeString()}.`;
-    setCloudSyncActivity("Saved");
-    setCloudStatus(silent ? `Auto-${message.charAt(0).toLowerCase()}${message.slice(1)}` : message);
+    markSaveSuccess(writeResult.updated_at);
   };
 
   const performCloudPull = async ({ silent = false } = {}) => {
@@ -4875,7 +5038,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5f · protect local saves</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5h · polished FT share</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
