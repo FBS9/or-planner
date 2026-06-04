@@ -2572,7 +2572,7 @@ export default function ORPlannerApp() {
 
   const sfAddSurgeonToRosterFromRow = (row) => {
     const facility = sfCanonicalFacilityName(row?.facility);
-    const typedSurgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
+    const typedSurgeonName = normalizeSfText(Object.prototype.hasOwnProperty.call(row || {}, "rosterSurgeonName") ? row?.rosterSurgeonName : row?.surgeon);
     const sourceSurgeon = normalizeSfText(row?.sourceSurgeonName || row?.surgeonCanonicalizedFrom || row?.surgeon);
     if (!facility || !typedSurgeonName) return;
 
@@ -4858,7 +4858,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5d · add roster remembers alias</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5e · editable add-roster surgeon name</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
@@ -5152,7 +5152,7 @@ export default function ORPlannerApp() {
                                   <label className="block">
                                     <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-amber-800">Save surgeon as</span>
                                     <input
-                                      value={item.rosterSurgeonName || item.surgeon || ""}
+                                      value={Object.prototype.hasOwnProperty.call(item, "rosterSurgeonName") ? item.rosterSurgeonName : (item.surgeon || "")}
                                       onChange={(event) => updateSalesforceRow(item.id, { rosterSurgeonName: event.target.value })}
                                       className="input bg-white text-sm"
                                       placeholder="Surgeon name for roster"
