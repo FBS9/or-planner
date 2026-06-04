@@ -917,6 +917,7 @@ export default function ORPlannerApp() {
           surgeon: item?.surgeon || "",
           procedure: item?.procedure || "",
           notes: item?.notes || "",
+          time: item?.time || "",
           fastTracking: Boolean(item?.fastTracking),
           reconciled: Boolean(item?.reconciled),
           growth: Boolean(item?.growth),
@@ -2570,20 +2571,51 @@ export default function ORPlannerApp() {
   };
 
   const sfAddSurgeonToRosterFromRow = (row) => {
-    const facility = normalizeSfText(row?.facility);
+    const facility = sfCanonicalFacilityName(row?.facility);
     const typedSurgeonName = normalizeSfText(row?.rosterSurgeonName || row?.surgeon);
+    const sourceSurgeon = normalizeSfText(row?.sourceSurgeonName || row?.surgeonCanonicalizedFrom || row?.surgeon);
     if (!facility || !typedSurgeonName) return;
+
+    const rememberAndPatchRows = (canonicalName, subspecialty = "") => {
+      const sourceNameForAlias = sourceSurgeon || canonicalName;
+      if (sourceNameForAlias) {
+        sfRememberSurgeonAlias(facility, sourceNameForAlias, canonicalName);
+      }
+
+      setSfExtractedCases((prev) => {
+        const patchedRows = prev.map((item) => {
+          const itemFacility = sfCanonicalFacilityName(item?.facility);
+          const itemSourceSurgeon = normalizeSfText(item?.sourceSurgeonName || item?.surgeonCanonicalizedFrom || item?.surgeon);
+          const sameRow = item.id === row.id;
+          const sameSalesforceName =
+            sourceNameForAlias &&
+            itemFacility === facility &&
+            normalizeSurgeonSearch(itemSourceSurgeon) === normalizeSurgeonSearch(sourceNameForAlias);
+
+          if (!sameRow && !sameSalesforceName) return item;
+
+          return sfCanonicalizeProcedureForRow(sfCanonicalizeSurgeonForRow({
+            ...item,
+            facility,
+            surgeon: canonicalName,
+            rosterSurgeonName: canonicalName,
+            rosterSurgeonSubspecialty: subspecialty || item?.rosterSurgeonSubspecialty || item?.category || "",
+            surgeonCanonicalizedFrom: sourceNameForAlias,
+            sourceSurgeonName: sourceNameForAlias,
+            actionManuallyEdited: false,
+          }));
+        });
+
+        return sfResolveRowsWithUniquePlannerMatches(patchedRows, sfScreenshotType);
+      });
+    };
 
     const existingMatch = sfBestRosterSurgeonMatch(facility, typedSurgeonName);
     if (existingMatch?.surgeon?.name) {
       const canonicalName = existingMatch.surgeon.name;
-      updateSalesforceRow(row.id, {
-        surgeon: canonicalName,
-        rosterSurgeonName: canonicalName,
-        rosterSurgeonSubspecialty: existingMatch.surgeon.subspecialty || row?.rosterSurgeonSubspecialty || row?.category || "",
-        surgeonCanonicalizedFrom: normalizeSfText(row?.surgeon),
-      });
-      setSfApplySummary(`Matched ${typedSurgeonName} to existing roster surgeon ${canonicalName}. No duplicate surgeon was added.`);
+      const subspecialty = existingMatch.surgeon.subspecialty || row?.rosterSurgeonSubspecialty || row?.category || "";
+      rememberAndPatchRows(canonicalName, subspecialty);
+      setSfApplySummary(`Matched ${sourceSurgeon || typedSurgeonName} to existing roster surgeon ${canonicalName}. Future imports will remember that match.`);
       return;
     }
 
@@ -2621,13 +2653,8 @@ export default function ORPlannerApp() {
       setGrowthSurgeons((prev) => (prev.includes(surgeonName) ? prev : [...prev, surgeonName]));
     }
 
-    updateSalesforceRow(row.id, {
-      surgeon: surgeonName,
-      rosterSurgeonName: surgeonName,
-      rosterSurgeonSubspecialty: subspecialty,
-    });
-
-    setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster.`);
+    rememberAndPatchRows(surgeonName, subspecialty);
+    setSfApplySummary(`Added ${surgeonName} to the ${facility} surgeon roster and remembered ${sourceSurgeon || surgeonName} as that roster name.`);
   };
 
 
@@ -4831,7 +4858,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5c · controlled facility surgeon dropdown</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5d · add roster remembers alias</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
