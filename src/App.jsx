@@ -510,9 +510,13 @@ export default function ORPlannerApp() {
 
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
-      const scale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
-      const width = 1400;
-      const margin = 64;
+      const isMobileShareDevice = /iphone|ipad|ipod|android/i.test(navigator.userAgent || "") || window.innerWidth < 768;
+      // iPhone/Safari can fail sharing very tall, high-DPI canvases. Keep the
+      // generated share image professional but mobile-safe by using a smaller
+      // canvas and lower pixel scale on phones.
+      const scale = isMobileShareDevice ? 1 : Math.max(1.5, Math.min(window.devicePixelRatio || 2, 2));
+      const width = isMobileShareDevice ? 1080 : 1400;
+      const margin = isMobileShareDevice ? 44 : 64;
       const contentWidth = width - margin * 2;
       const palette = {
         page: "#f8fafc",
@@ -626,8 +630,8 @@ export default function ORPlannerApp() {
       });
 
       const height = Math.max(780, 238 + layout.reduce((sum, line) => sum + line.height, 0) + 72);
-      canvas.width = width * scale;
-      canvas.height = height * scale;
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.scale(scale, scale);
@@ -638,18 +642,18 @@ export default function ORPlannerApp() {
       // Header
       drawRoundRect(margin, 40, contentWidth, 146, 28, palette.card, palette.line, 2);
       ctx.fillStyle = palette.ink;
-      ctx.font = "bold 52px Arial";
+      ctx.font = isMobileShareDevice ? "bold 46px Arial" : "bold 52px Arial";
       ctx.fillText(title, margin + 34, 96);
       ctx.fillStyle = palette.muted;
-      ctx.font = "28px Arial";
+      ctx.font = isMobileShareDevice ? "24px Arial" : "28px Arial";
       ctx.fillText(weekLabel, margin + 34, 134);
       ctx.fillStyle = palette.blue;
-      ctx.font = "bold 26px Arial";
+      ctx.font = isMobileShareDevice ? "bold 22px Arial" : "bold 26px Arial";
       ctx.fillText(`${subtitle} · ${caseCountLabel}`, margin + 34, 170);
 
       drawRoundRect(width - margin - 250, 76, 206, 62, 31, palette.greenSoft, "", 0);
       ctx.fillStyle = palette.greenInk;
-      ctx.font = "bold 30px Arial";
+      ctx.font = isMobileShareDevice ? "bold 26px Arial" : "bold 30px Arial";
       ctx.textAlign = "center";
       ctx.fillText("FT Summary", width - margin - 147, 116);
       ctx.textAlign = "left";
@@ -712,21 +716,31 @@ export default function ORPlannerApp() {
       ctx.font = "22px Arial";
       ctx.fillText(`Generated from OR Planner · ${new Date().toLocaleDateString()}`, margin, height - 34);
 
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.95));
+      const outputType = isMobileShareDevice ? "image/jpeg" : "image/png";
+      const outputExtension = isMobileShareDevice ? "jpg" : "png";
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputType, 0.9));
       if (!blob) throw new Error("Could not create image.");
 
-      const filename = `fast-tracked-cases-${weekDates[0]}.png`;
-      const file = new File([blob], filename, { type: "image/png" });
+      const filename = `fast-tracked-cases-${weekDates[0]}.${outputExtension}`;
+      const file = new File([blob], filename, { type: outputType });
 
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          title: `${title} — ${weekLabel}`,
-          text: `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}`,
-          files: [file],
-        });
-        setFtShareStatus("Shared.");
-      } else if (navigator.clipboard && window.ClipboardItem) {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        try {
+          await navigator.share({
+            title: `${title} — ${weekLabel}`,
+            text: `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}`,
+            files: [file],
+          });
+          setFtShareStatus("Shared.");
+        } catch (shareError) {
+          if (shareError?.name === "AbortError") {
+            setFtShareStatus("");
+            return;
+          }
+          throw shareError;
+        }
+      } else if (!isMobileShareDevice && navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ [outputType]: blob })]);
         setFtShareStatus("Copied image.");
       } else {
         const url = URL.createObjectURL(blob);
@@ -5038,7 +5052,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5h · polished FT share</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5i · mobile-safe FT share</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
