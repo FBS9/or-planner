@@ -3157,13 +3157,30 @@ export default function ORPlannerApp() {
     const suggestedAction = sfSuggestedAction(baseRow, screenshotType);
     const screenshotKey = normalizeSfKey(screenshotType);
     const recommendedKey = normalizeSfKey(baseRow.recommendedAction);
+    const isAccountHistoryImport = screenshotKey.includes("account procedure history");
     const isScheduledProceduresRow = screenshotKey.includes("scheduled procedures") || recommendedKey.includes("import new fast tracking");
     const matchMode = isScheduledProceduresRow ? "scheduled" : suggestedAction === "markReconciled" ? "reconcile" : "normal";
     const matches = sfGetPlannerMatches(baseRow, matchMode).filter((match) => !reservedPlannerCaseIds.has(match.plannerCase.id));
     const bestMatch = matches[0];
 
+    // Account Procedure History sometimes misses the Salesforce Scheduled date
+    // even though the case was already FT in OR Planner. After scheduled-date
+    // rows get first priority, blank-scheduled completed rows should still look
+    // for leftover matching FT planner cases before importing a duplicate Non-FT case.
+    const blankScheduledCompletedAccountRow = Boolean(
+      isAccountHistoryImport &&
+      suggestedAction === "importNewNormalReconciled" &&
+      !normalizeSfText(baseRow.scheduledDate) &&
+      sfIsCompleted(baseRow)
+    );
+    const leftoverFastTrackMatches = blankScheduledCompletedAccountRow
+      ? sfGetPlannerMatches(baseRow, "reconcile").filter((match) => !reservedPlannerCaseIds.has(match.plannerCase.id))
+      : [];
+    const bestLeftoverFastTrackMatch = leftoverFastTrackMatches[0];
+
     let action = "review";
     let selectedPlannerCaseId = "";
+    let displayBestMatch = bestMatch;
 
     // Scheduled Procedures rows are clean scheduled-case imports.
     // If an exact duplicate already exists and is already fast tracked, ignore it.
@@ -3198,11 +3215,20 @@ export default function ORPlannerApp() {
         selectedPlannerCaseId = bestMatch?.status === "Possible Match" ? bestMatch.plannerCase.id : "";
       }
     } else if (["importNew", "importNewReconciled", "importNewNormal", "importNewNormalReconciled"].includes(suggestedAction)) {
-      // Account History rows without Scheduled date are not fast tracked.
-      // If an exact duplicate already exists, update only reconciliation when needed,
-      // otherwise ignore duplicate normal rows.
+      // Account History rows without Scheduled date are normally not fast tracked.
+      // But if Salesforce forgot the Scheduled date and there is still a leftover
+      // matching FT planner case, reconcile that existing FT case instead of
+      // importing a duplicate Non-FT case.
       if (!sfHasRequiredNewCaseFields(baseRow, screenshotType)) {
         action = "review";
+      } else if (blankScheduledCompletedAccountRow && bestLeftoverFastTrackMatch?.status === "Match") {
+        action = bestLeftoverFastTrackMatch.plannerCase.reconciled ? "ignore" : "markReconciled";
+        selectedPlannerCaseId = action === "ignore" ? "" : bestLeftoverFastTrackMatch.plannerCase.id;
+        displayBestMatch = bestLeftoverFastTrackMatch;
+      } else if (blankScheduledCompletedAccountRow && bestLeftoverFastTrackMatch?.status === "Possible Match") {
+        action = "review";
+        selectedPlannerCaseId = bestLeftoverFastTrackMatch.plannerCase.id;
+        displayBestMatch = bestLeftoverFastTrackMatch;
       } else if (bestMatch?.status === "Match") {
         if (suggestedAction === "importNewNormalReconciled") {
           action = bestMatch.plannerCase.reconciled ? "ignore" : "markReconciledOnly";
@@ -3228,10 +3254,10 @@ export default function ORPlannerApp() {
       suggestedAction,
       action,
       selectedPlannerCaseId,
-      matchStatus: bestMatch?.status || "No Match",
-      matchScore: bestMatch?.score || 0,
-      matchReasons: bestMatch?.reasons || [],
-      matchedPlannerCaseId: bestMatch?.status === "Match" ? bestMatch.plannerCase.id : "",
+      matchStatus: displayBestMatch?.status || "No Match",
+      matchScore: displayBestMatch?.score || 0,
+      matchReasons: displayBestMatch?.reasons || [],
+      matchedPlannerCaseId: displayBestMatch?.status === "Match" ? displayBestMatch.plannerCase.id : "",
     };
   };
 
@@ -3255,23 +3281,45 @@ export default function ORPlannerApp() {
   };
 
   const sfResolveRowsWithUniquePlannerMatches = (rows, screenshotType) => {
+    const safeRows = rows || [];
+    const screenshotKey = normalizeSfKey(screenshotType);
+    const isAccountHistoryImport = screenshotKey.includes("account procedure history");
+
     // Manual choices should win. Reserve them before auto-matching the rest of
     // the Salesforce rows so one OR Planner case cannot be reused elsewhere.
     const reservedPlannerCaseIds = new Set(
-      (rows || [])
+      safeRows
         .filter((row) => row?.actionManuallyEdited && row?.selectedPlannerCaseId)
         .map((row) => row.selectedPlannerCaseId)
     );
 
-    return rows.map((row) => {
-      if (row.actionManuallyEdited) {
-        const plannerCaseId = sfPlannerCaseIdUsedByRow(row);
-        if (plannerCaseId) reservedPlannerCaseIds.add(plannerCaseId);
-        return row;
-      }
+    const resolvedRows = [...safeRows];
 
+    safeRows.forEach((row, index) => {
+      if (!row?.actionManuallyEdited) return;
+      const plannerCaseId = sfPlannerCaseIdUsedByRow(row);
+      if (plannerCaseId) reservedPlannerCaseIds.add(plannerCaseId);
+      resolvedRows[index] = row;
+    });
+
+    const priorityForRow = (row) => {
+      if (!isAccountHistoryImport) return 10;
+      const hasScheduledDate = Boolean(normalizeSfText(row?.scheduledDate));
+      if (hasScheduledDate && sfIsCompleted(row)) return 0;
+      if (hasScheduledDate) return 1;
+      if (sfIsCompleted(row)) return 2;
+      return 3;
+    };
+
+    const rowsToResolve = safeRows
+      .map((row, index) => ({ row, index, priority: priorityForRow(row) }))
+      .filter((entry) => !entry.row?.actionManuallyEdited)
+      .sort((a, b) => a.priority - b.priority || a.index - b.index);
+
+    rowsToResolve.forEach(({ row, index }) => {
       const resolved = sfResolveRowReviewState(row, screenshotType, reservedPlannerCaseIds);
       const updated = { ...row, ...resolved };
+      resolvedRows[index] = updated;
 
       // One existing OR Planner case can only satisfy one Salesforce row.
       // This prevents two Salesforce rows from sharing the same matched case
@@ -3280,9 +3328,9 @@ export default function ORPlannerApp() {
       if (plannerCaseId) {
         reservedPlannerCaseIds.add(plannerCaseId);
       }
-
-      return updated;
     });
+
+    return resolvedRows;
   };
 
   const sfInferFacilityForAccountSnippetRows = (rows, screenshotType) => {
@@ -5088,7 +5136,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5j · daily mobile FT share</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5k · reconcile blank scheduled FT matches</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
