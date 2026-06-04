@@ -503,81 +503,19 @@ export default function ORPlannerApp() {
         return;
       }
 
+      const isMobileShareDevice = /iphone|ipad|ipod|android/i.test(navigator.userAgent || "") || window.innerWidth < 768;
       const title = "Fast Tracked Cases";
       const weekLabel = `Week of ${formatLongDate(weekDates[0])}`;
       const subtitle = selectedFacility === ALL_FACILITIES ? "All Facilities" : selectedFacility;
       const caseCountLabel = `${ftCases.length} fast tracked case${ftCases.length === 1 ? "" : "s"}`;
-
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      const isMobileShareDevice = /iphone|ipad|ipod|android/i.test(navigator.userAgent || "") || window.innerWidth < 768;
-      // iPhone/Safari can fail sharing very tall, high-DPI canvases. Keep the
-      // generated share image professional but mobile-safe by using a smaller
-      // canvas and lower pixel scale on phones.
-      const scale = isMobileShareDevice ? 1 : Math.max(1.5, Math.min(window.devicePixelRatio || 2, 2));
-      const width = isMobileShareDevice ? 1080 : 1400;
-      const margin = isMobileShareDevice ? 44 : 64;
-      const contentWidth = width - margin * 2;
-      const palette = {
-        page: "#f8fafc",
-        card: "#ffffff",
-        ink: "#0f172a",
-        muted: "#64748b",
-        line: "#dbe4ef",
-        blue: "#1d4ed8",
-        blueSoft: "#dbeafe",
-        blueInk: "#1e3a8a",
-        slateSoft: "#f1f5f9",
-        greenSoft: "#dcfce7",
-        greenInk: "#166534",
-      };
-
-      const drawRoundRect = (x, y, w, h, r, fill, stroke = "", lineWidth = 1) => {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-        if (fill) {
-          ctx.fillStyle = fill;
-          ctx.fill();
-        }
-        if (stroke) {
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = lineWidth;
-          ctx.stroke();
-        }
-      };
-
-      const wrapText = (text, font, maxWidth) => {
-        ctx.font = font;
-        const words = String(text || "").split(/\s+/).filter(Boolean);
-        const output = [];
-        let current = "";
-        words.forEach((word) => {
-          const next = current ? `${current} ${word}` : word;
-          if (ctx.measureText(next).width <= maxWidth || !current) {
-            current = next;
-          } else {
-            output.push(current);
-            current = word;
-          }
-        });
-        if (current) output.push(current);
-        return output.length ? output : [""];
-      };
 
       const groupedDays = weekDates.map((dateKey) => {
         const dayCases = ftCases.filter((item) => item.displayDateKey === dateKey);
         const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
         return {
           dateKey,
+          label: fromDateKey(dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }),
+          count: dayCases.length,
           facilities: facilitiesForDay.map((facility) => {
             const facilityCases = dayCases.filter((item) => (item.facility || "No Facility") === facility).sort(compareCasesByTime);
             const surgeonsForFacility = Array.from(new Set(facilityCases.map((item) => item.surgeon || "No Surgeon"))).sort((a, b) => a.localeCompare(b));
@@ -598,138 +536,232 @@ export default function ORPlannerApp() {
             };
           }),
         };
-      }).filter((day) => day.facilities.length > 0);
+      }).filter((day) => day.count > 0);
 
-      const layout = [];
-      groupedDays.forEach((day) => {
-        const dayLabel = fromDateKey(day.dateKey).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
-        layout.push({ type: "day", text: dayLabel, height: 58 });
+      const makeShareImage = async ({ days, filenameSuffix, headerTitle, headerSubtitle, headerCount, compact = false }) => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const scale = isMobileShareDevice ? 1 : Math.max(1.5, Math.min(window.devicePixelRatio || 2, 2));
+        const width = isMobileShareDevice ? 1170 : 1400;
+        const margin = isMobileShareDevice ? 54 : 64;
+        const contentWidth = width - margin * 2;
+        const palette = {
+          page: "#f8fafc",
+          card: "#ffffff",
+          ink: "#0f172a",
+          muted: "#64748b",
+          line: "#dbe4ef",
+          blue: "#1d4ed8",
+          blueSoft: "#dbeafe",
+          blueInk: "#1e3a8a",
+          slateSoft: "#f1f5f9",
+          greenSoft: "#dcfce7",
+          greenInk: "#166534",
+        };
 
-        day.facilities.forEach((facilityGroup) => {
-          layout.push({ type: "facility", text: facilityGroup.facility, count: facilityGroup.count, height: 54 });
+        const drawRoundRect = (x, y, w, h, r, fill, stroke = "", lineWidth = 1) => {
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.lineTo(x + w - r, y);
+          ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+          ctx.lineTo(x + w, y + h - r);
+          ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+          ctx.lineTo(x + r, y + h);
+          ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+          ctx.lineTo(x, y + r);
+          ctx.quadraticCurveTo(x, y, x + r, y);
+          ctx.closePath();
+          if (fill) {
+            ctx.fillStyle = fill;
+            ctx.fill();
+          }
+          if (stroke) {
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
+          }
+        };
 
-          facilityGroup.surgeons.forEach((surgeonGroup) => {
-            layout.push({ type: "surgeon", text: surgeonGroup.surgeon, count: surgeonGroup.count, height: 42 });
+        const wrapText = (value, font, maxWidth) => {
+          ctx.font = font;
+          const words = String(value || "").split(/\s+/).filter(Boolean);
+          const output = [];
+          let current = "";
+          words.forEach((word) => {
+            const next = current ? `${current} ${word}` : word;
+            if (ctx.measureText(next).width <= maxWidth || !current) {
+              current = next;
+            } else {
+              output.push(current);
+              current = word;
+            }
+          });
+          if (current) output.push(current);
+          return output.length ? output : [""];
+        };
 
-            surgeonGroup.procedures.forEach((caseItem) => {
-              const lineText = `${caseItem.time ? `${caseItem.time} — ` : ""}${caseItem.procedure}`;
-              const wrapped = wrapText(lineText, "27px Arial", contentWidth - 146);
-              wrapped.forEach((line, index) => {
-                layout.push({
-                  type: index === 0 ? "procedure" : "procedureWrap",
-                  text: line,
-                  height: 34,
+        const layout = [];
+        days.forEach((day) => {
+          layout.push({ type: "day", text: day.label, count: day.count, height: 64 });
+          day.facilities.forEach((facilityGroup) => {
+            layout.push({ type: "facility", text: facilityGroup.facility, count: facilityGroup.count, height: 58 });
+            facilityGroup.surgeons.forEach((surgeonGroup) => {
+              layout.push({ type: "surgeon", text: surgeonGroup.surgeon, count: surgeonGroup.count, height: 46 });
+              surgeonGroup.procedures.forEach((caseItem) => {
+                const lineText = `${caseItem.time ? `${caseItem.time} — ` : ""}${caseItem.procedure}`;
+                const wrapped = wrapText(lineText, compact ? "30px Arial" : "31px Arial", contentWidth - 182);
+                wrapped.forEach((line, index) => {
+                  layout.push({
+                    type: index === 0 ? "procedure" : "procedureWrap",
+                    text: line,
+                    height: compact ? 40 : 42,
+                  });
                 });
               });
+              layout.push({ type: "surgeonGap", height: 14 });
             });
-            layout.push({ type: "surgeonGap", height: 8 });
+            layout.push({ type: "facilityGap", height: 20 });
           });
-          layout.push({ type: "facilityGap", height: 14 });
+          layout.push({ type: "dayGap", height: 24 });
         });
-        layout.push({ type: "dayGap", height: 22 });
-      });
 
-      const height = Math.max(780, 238 + layout.reduce((sum, line) => sum + line.height, 0) + 72);
-      canvas.width = Math.round(width * scale);
-      canvas.height = Math.round(height * scale);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      ctx.scale(scale, scale);
+        const headerHeight = compact ? 192 : 216;
+        const height = Math.max(780, headerHeight + layout.reduce((sum, line) => sum + line.height, 0) + 78);
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(scale, scale);
 
-      ctx.fillStyle = palette.page;
-      ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = palette.page;
+        ctx.fillRect(0, 0, width, height);
 
-      // Header
-      drawRoundRect(margin, 40, contentWidth, 146, 28, palette.card, palette.line, 2);
-      ctx.fillStyle = palette.ink;
-      ctx.font = isMobileShareDevice ? "bold 46px Arial" : "bold 52px Arial";
-      ctx.fillText(title, margin + 34, 96);
-      ctx.fillStyle = palette.muted;
-      ctx.font = isMobileShareDevice ? "24px Arial" : "28px Arial";
-      ctx.fillText(weekLabel, margin + 34, 134);
-      ctx.fillStyle = palette.blue;
-      ctx.font = isMobileShareDevice ? "bold 22px Arial" : "bold 26px Arial";
-      ctx.fillText(`${subtitle} · ${caseCountLabel}`, margin + 34, 170);
+        drawRoundRect(margin, 38, contentWidth, compact ? 132 : 150, 28, palette.card, palette.line, 2);
+        ctx.fillStyle = palette.ink;
+        ctx.font = compact ? "bold 44px Arial" : "bold 50px Arial";
+        ctx.fillText(headerTitle, margin + 34, compact ? 90 : 96);
+        ctx.fillStyle = palette.muted;
+        ctx.font = compact ? "24px Arial" : "26px Arial";
+        ctx.fillText(headerSubtitle, margin + 34, compact ? 125 : 134);
+        ctx.fillStyle = palette.blue;
+        ctx.font = compact ? "bold 22px Arial" : "bold 24px Arial";
+        ctx.fillText(headerCount, margin + 34, compact ? 158 : 170);
 
-      drawRoundRect(width - margin - 250, 76, 206, 62, 31, palette.greenSoft, "", 0);
-      ctx.fillStyle = palette.greenInk;
-      ctx.font = isMobileShareDevice ? "bold 26px Arial" : "bold 30px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("FT Summary", width - margin - 147, 116);
-      ctx.textAlign = "left";
+        drawRoundRect(width - margin - 220, compact ? 72 : 76, 176, 56, 28, palette.greenSoft, "", 0);
+        ctx.fillStyle = palette.greenInk;
+        ctx.font = compact ? "bold 24px Arial" : "bold 26px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("FT Summary", width - margin - 132, compact ? 108 : 112);
+        ctx.textAlign = "left";
 
-      let y = 230;
-      layout.forEach((line) => {
-        if (line.type === "day") {
-          drawRoundRect(margin, y, contentWidth, 50, 18, palette.blueSoft, "", 0);
-          ctx.fillStyle = palette.blueInk;
-          ctx.font = "bold 30px Arial";
-          ctx.fillText(line.text, margin + 24, y + 34);
+        let y = compact ? 206 : 230;
+        layout.forEach((line) => {
+          if (line.type === "day") {
+            drawRoundRect(margin, y, contentWidth, 54, 18, palette.blueSoft, "", 0);
+            ctx.fillStyle = palette.blueInk;
+            ctx.font = "bold 34px Arial";
+            ctx.fillText(line.text, margin + 24, y + 37);
+            ctx.fillStyle = palette.blueInk;
+            ctx.font = "bold 22px Arial";
+            ctx.textAlign = "right";
+            ctx.fillText(`${line.count}`, width - margin - 28, y + 36);
+            ctx.textAlign = "left";
+            y += line.height;
+            return;
+          }
+
+          if (line.type === "facility") {
+            drawRoundRect(margin + 18, y, contentWidth - 36, 48, 16, palette.card, palette.line, 1.5);
+            ctx.fillStyle = palette.ink;
+            ctx.font = "bold 31px Arial";
+            ctx.fillText(line.text, margin + 44, y + 33);
+
+            const countText = `${line.count}`;
+            ctx.font = "bold 21px Arial";
+            const pillW = Math.max(46, ctx.measureText(countText).width + 30);
+            drawRoundRect(width - margin - 58 - pillW, y + 10, pillW, 30, 15, palette.slateSoft, palette.line, 1);
+            ctx.fillStyle = palette.muted;
+            ctx.textAlign = "center";
+            ctx.fillText(countText, width - margin - 58 - pillW / 2, y + 32);
+            ctx.textAlign = "left";
+            y += line.height;
+            return;
+          }
+
+          if (line.type === "surgeon") {
+            ctx.fillStyle = palette.ink;
+            ctx.font = "bold 31px Arial";
+            ctx.fillText(line.text, margin + 72, y + 32);
+
+            // Keep the count as a separated badge on the far right so it never
+            // merges into the surgeon name on mobile zoom.
+            const countText = `${line.count}`;
+            ctx.font = "bold 20px Arial";
+            const pillW = Math.max(42, ctx.measureText(countText).width + 26);
+            drawRoundRect(width - margin - 76 - pillW, y + 8, pillW, 28, 14, palette.slateSoft, palette.line, 1);
+            ctx.fillStyle = palette.muted;
+            ctx.textAlign = "center";
+            ctx.fillText(countText, width - margin - 76 - pillW / 2, y + 29);
+            ctx.textAlign = "left";
+            y += line.height;
+            return;
+          }
+
+          if (line.type === "procedure" || line.type === "procedureWrap") {
+            ctx.fillStyle = palette.muted;
+            ctx.font = line.type === "procedure" ? "30px Arial" : "28px Arial";
+            if (line.type === "procedure") ctx.fillText("•", margin + 104, y + 29);
+            ctx.fillStyle = "#334155";
+            ctx.fillText(line.text, margin + 138, y + 29);
+            y += line.height;
+            return;
+          }
+
           y += line.height;
-          return;
-        }
+        });
 
-        if (line.type === "facility") {
-          drawRoundRect(margin + 18, y, contentWidth - 36, 46, 16, palette.card, palette.line, 1.5);
-          ctx.fillStyle = palette.ink;
-          ctx.font = "bold 28px Arial";
-          ctx.fillText(line.text, margin + 42, y + 31);
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "22px Arial";
+        ctx.fillText(`Generated from OR Planner · ${new Date().toLocaleDateString()}`, margin, height - 34);
 
-          const countText = `${line.count}`;
-          ctx.font = "bold 20px Arial";
-          const pillW = Math.max(42, ctx.measureText(countText).width + 28);
-          drawRoundRect(width - margin - 56 - pillW, y + 9, pillW, 28, 14, palette.slateSoft, palette.line, 1);
-          ctx.fillStyle = palette.muted;
-          ctx.textAlign = "center";
-          ctx.fillText(countText, width - margin - 56 - pillW / 2, y + 30);
-          ctx.textAlign = "left";
-          y += line.height;
-          return;
-        }
+        const outputType = isMobileShareDevice ? "image/jpeg" : "image/png";
+        const outputExtension = isMobileShareDevice ? "jpg" : "png";
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputType, 0.9));
+        if (!blob) throw new Error("Could not create image.");
 
-        if (line.type === "surgeon") {
-          ctx.fillStyle = palette.ink;
-          ctx.font = "bold 26px Arial";
-          ctx.fillText(line.text, margin + 64, y + 28);
-          ctx.fillStyle = palette.muted;
-          ctx.font = "20px Arial";
-          ctx.fillText(`${line.count} case${line.count === 1 ? "" : "s"}`, margin + 64 + ctx.measureText(line.text).width + 18, y + 28);
-          y += line.height;
-          return;
-        }
+        return new File([blob], `fast-tracked-cases-${filenameSuffix}.${outputExtension}`, { type: outputType });
+      };
 
-        if (line.type === "procedure" || line.type === "procedureWrap") {
-          ctx.fillStyle = palette.muted;
-          ctx.font = line.type === "procedure" ? "27px Arial" : "25px Arial";
-          const prefix = line.type === "procedure" ? "•" : "";
-          ctx.fillText(prefix, margin + 82, y + 24);
-          ctx.fillStyle = "#334155";
-          ctx.fillText(line.text, margin + 110, y + 24);
-          y += line.height;
-          return;
-        }
+      const filesToShare = isMobileShareDevice
+        ? await Promise.all(groupedDays.map((day) =>
+            makeShareImage({
+              days: [day],
+              filenameSuffix: day.dateKey,
+              headerTitle: `${title}`,
+              headerSubtitle: `${day.label} · ${weekLabel}`,
+              headerCount: `${subtitle} · ${day.count} fast tracked case${day.count === 1 ? "" : "s"}`,
+              compact: true,
+            })
+          ))
+        : [await makeShareImage({
+            days: groupedDays,
+            filenameSuffix: weekDates[0],
+            headerTitle: title,
+            headerSubtitle: weekLabel,
+            headerCount: `${subtitle} · ${caseCountLabel}`,
+            compact: false,
+          })];
 
-        y += line.height;
-      });
+      const shareText = isMobileShareDevice
+        ? `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}\\nShared as ${filesToShare.length} daily image${filesToShare.length === 1 ? "" : "s"}.`
+        : `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}`;
 
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = "22px Arial";
-      ctx.fillText(`Generated from OR Planner · ${new Date().toLocaleDateString()}`, margin, height - 34);
-
-      const outputType = isMobileShareDevice ? "image/jpeg" : "image/png";
-      const outputExtension = isMobileShareDevice ? "jpg" : "png";
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, outputType, 0.9));
-      if (!blob) throw new Error("Could not create image.");
-
-      const filename = `fast-tracked-cases-${weekDates[0]}.${outputExtension}`;
-      const file = new File([blob], filename, { type: outputType });
-
-      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: filesToShare }))) {
         try {
           await navigator.share({
             title: `${title} — ${weekLabel}`,
-            text: `${title}\\n${weekLabel}\\n${subtitle}\\n${caseCountLabel}`,
-            files: [file],
+            text: shareText,
+            files: filesToShare,
           });
           setFtShareStatus("Shared.");
         } catch (shareError) {
@@ -739,20 +771,24 @@ export default function ORPlannerApp() {
           }
           throw shareError;
         }
-      } else if (!isMobileShareDevice && navigator.clipboard && window.ClipboardItem) {
-        await navigator.clipboard.write([new ClipboardItem({ [outputType]: blob })]);
+      } else if (!isMobileShareDevice && navigator.clipboard && window.ClipboardItem && filesToShare[0]) {
+        const firstFile = filesToShare[0];
+        await navigator.clipboard.write([new ClipboardItem({ [firstFile.type]: firstFile })]);
         setFtShareStatus("Copied image.");
       } else {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-        setFtShareStatus("Downloaded image.");
+        filesToShare.forEach((file) => {
+          const url = URL.createObjectURL(file);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = file.name;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+        });
+        setFtShareStatus(isMobileShareDevice ? "Downloaded daily images." : "Downloaded image.");
       }
+
       setTimeout(() => setFtShareStatus(""), 3000);
     } catch (error) {
       console.error(error);
@@ -5052,7 +5088,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5i · mobile-safe FT share</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5j · daily mobile FT share</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
