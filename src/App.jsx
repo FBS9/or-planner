@@ -995,6 +995,10 @@ export default function ORPlannerApp() {
     latestLocalCloudSnapshotRef.current = pulledSnapshotString;
     lastCloudUpdatedAtRef.current = updatedAt || new Date().toISOString();
     localDirtyRef.current = false;
+    if (cloudAutoSaveTimerRef.current) {
+      window.clearTimeout(cloudAutoSaveTimerRef.current);
+      cloudAutoSaveTimerRef.current = null;
+    }
     window.setTimeout(() => {
       isApplyingCloudRef.current = false;
       setAutoCloudReady(true);
@@ -1019,20 +1023,26 @@ export default function ORPlannerApp() {
     if (!silent) setCloudBusy(true);
     setCloudSyncActivity("Checking cloud...");
 
-    const expectedUpdatedAt = lastCloudUpdatedAtRef.current || null;
+    let expectedUpdatedAt = lastCloudUpdatedAtRef.current || null;
     const { data: cloudData, error: cloudReadError } = await getCloudRecord();
 
     if (cloudReadError) {
       if (!silent) setCloudBusy(false);
+      localDirtyRef.current = true;
       setCloudSyncActivity("Save failed");
       setCloudStatus(cloudReadError.message);
       return;
     }
 
     if (isCloudTimestampNewerThanBaseline(cloudData?.updated_at, expectedUpdatedAt)) {
-      if (!silent) setCloudBusy(false);
-      showCloudSaveConflict(cloudData.updated_at);
-      return;
+      // This device has an actual local edit it is trying to save. Do not pull
+      // the different cloud copy over it. Advance to the latest cloud baseline,
+      // then save this device's current planner snapshot.
+      expectedUpdatedAt = cloudData.updated_at;
+      lastCloudUpdatedAtRef.current = cloudData.updated_at;
+      setCloudConflictUpdatedAt("");
+      setCloudSyncActivity("Saving local changes...");
+      if (!silent) setCloudStatus("Cloud changed since the last sync. Saving this device's latest planner changes now.");
     }
 
     setCloudSyncActivity("Saving...");
@@ -1045,13 +1055,19 @@ export default function ORPlannerApp() {
     if (!silent) setCloudBusy(false);
 
     if (writeError) {
+      localDirtyRef.current = true;
       setCloudSyncActivity("Save failed");
-      setCloudStatus(`Save blocked: ${writeError.message}`);
+      setCloudStatus(`Save failed. Local changes are still protected and will retry: ${writeError.message}`);
       return;
     }
 
     if (!writeResult?.saved) {
-      showCloudSaveConflict(writeResult?.updated_at);
+      localDirtyRef.current = true;
+      if (writeResult?.updated_at) {
+        lastCloudUpdatedAtRef.current = writeResult.updated_at;
+      }
+      setCloudSyncActivity("Save retry pending");
+      setCloudStatus("Cloud save did not complete. Local changes are still protected and will retry.");
       return;
     }
 
@@ -1221,8 +1237,9 @@ export default function ORPlannerApp() {
             return;
           }
 
-          if (localEditIsFresh) {
-            setCloudSyncActivity("Local edit pending");
+          if (localDirtyRef.current || hasUnsavedLocalWork || localEditIsFresh) {
+            setCloudSyncActivity("Local save pending");
+            setCloudStatus("Local changes are waiting to save. Cloud updates will not overwrite them.");
             return;
           }
 
@@ -1270,11 +1287,11 @@ export default function ORPlannerApp() {
           // source of truth. If this device has a fresh local edit, save it. Otherwise,
           // pull the cloud snapshot so desktop changes appear on mobile automatically.
           if (cloudDiffersFromLocal) {
-            // The sync checker is pull-only. It should never push this device's
-            // stale local copy over another device. Actual local edits are saved
-            // by the separate debounced auto-save effect above.
-            if (localEditIsFresh) {
-              setCloudSyncActivity("Local edit pending");
+            // If this device has unsaved local planner changes, protect them.
+            // Never auto-pull cloud over local work. Retry saving instead.
+            if (localDirtyRef.current || hasUnsavedLocalWork || localEditIsFresh) {
+              setCloudSyncActivity("Saving local changes...");
+              await performCloudSave({ silent: true });
               return;
             }
 
@@ -1290,7 +1307,7 @@ export default function ORPlannerApp() {
           return;
         }
 
-        if (localEditIsFresh) {
+        if (localDirtyRef.current || hasUnsavedLocalWork || localEditIsFresh) {
           setCloudSyncActivity("Auto-saving...");
           await performCloudSave({ silent: true });
         } else {
@@ -4858,7 +4875,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5e · editable add-roster surgeon name</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5f · protect local saves</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
