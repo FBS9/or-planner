@@ -4888,32 +4888,22 @@ export default function ORPlannerApp() {
 
       {showBulkCancelledFuReview && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm md:items-center">
-          <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
-            <div className="shrink-0 border-b border-slate-200 p-5">
+          <motion.div initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
+            <div className="shrink-0 border-b border-slate-200 p-4 md:p-5">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Review FT unreconciled cases</div>
-                  <h3 className="mt-1 text-2xl font-bold text-slate-900">Move selected cases to Cancelled F/U</h3>
-                  <p className="mt-1 text-sm text-slate-500">Only FT checked + Rec unchecked cases from the selected week/facility filter appear here. Uncheck any case you do not want to move yet.</p>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-amber-700 md:text-xs">Review FT unreconciled cases</div>
+                  <h3 className="mt-1 text-xl font-bold leading-tight text-slate-900 md:text-2xl">Move selected cases to Cancelled F/U</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500 md:text-sm">Uncheck anything you do not want moved yet.</p>
                 </div>
-                <Button onClick={closeBulkCancelledFuReview} variant="outline" className="rounded-2xl">Close</Button>
-              </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-                <Button
-                  onClick={confirmBulkCancelledFuMove}
-                  className="rounded-2xl bg-slate-950 py-5 text-base font-bold text-white hover:bg-slate-800"
-                  disabled={bulkCancelledFuSelectedKeys.length === 0}
-                >
-                  Move {bulkCancelledFuSelectedKeys.length} Selected
-                </Button>
-                <Button onClick={closeBulkCancelledFuReview} variant="secondary" className="rounded-2xl py-5 sm:w-32">Cancel</Button>
+                <Button onClick={closeBulkCancelledFuReview} variant="outline" className="shrink-0 rounded-2xl px-4 py-3 text-sm">Close</Button>
               </div>
             </div>
-            <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-5 py-3">
+            <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-3 md:px-5">
               <label className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-800 ring-1 ring-slate-200">
-                <span>Select all eligible cases</span>
+                <span className="leading-tight">Select all eligible</span>
                 <span className="flex items-center gap-3">
-                  <span className="text-xs font-semibold text-slate-500">{bulkCancelledFuSelectedKeys.length} of {bulkCancelledFuReviewItems.length} selected</span>
+                  <span className="text-xs font-semibold text-slate-500">{bulkCancelledFuSelectedKeys.length}/{bulkCancelledFuReviewItems.length} selected</span>
                   <input
                     type="checkbox"
                     checked={bulkCancelledFuReviewItems.length > 0 && bulkCancelledFuSelectedKeys.length === bulkCancelledFuReviewItems.length}
@@ -4923,7 +4913,7 @@ export default function ORPlannerApp() {
                 </span>
               </label>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto p-5">
+            <div className="min-h-0 flex-1 overflow-auto p-4 md:p-5">
               <div className="space-y-3">
                 {bulkCancelledFuReviewItems.map((caseItem) => {
                   const itemKey = bulkCancelledFuItemKey(caseItem);
@@ -4955,11 +4945,13 @@ export default function ORPlannerApp() {
                 })}
               </div>
             </div>
-            <div className="shrink-0 grid gap-2 border-t border-slate-200 bg-white p-5 sm:grid-cols-2">
-              <Button onClick={closeBulkCancelledFuReview} variant="secondary" className="rounded-2xl py-5">Cancel</Button>
-              <Button onClick={confirmBulkCancelledFuMove} className="rounded-2xl py-5" disabled={bulkCancelledFuSelectedKeys.length === 0}>
-                Move {bulkCancelledFuSelectedKeys.length} Selected
-              </Button>
+            <div className="shrink-0 border-t border-slate-200 bg-white/95 p-4 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur md:p-5">
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <Button onClick={confirmBulkCancelledFuMove} className="rounded-2xl py-5 text-base font-bold" disabled={bulkCancelledFuSelectedKeys.length === 0}>
+                  Move {bulkCancelledFuSelectedKeys.length} Selected
+                </Button>
+                <Button onClick={closeBulkCancelledFuReview} variant="secondary" className="rounded-2xl py-5 sm:w-36">Cancel</Button>
+              </div>
             </div>
           </motion.div>
         </div>
@@ -5148,7 +5140,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5l · visible mobile bulk move button</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5m · cleaner bulk move modal</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
