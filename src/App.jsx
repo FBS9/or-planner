@@ -465,6 +465,9 @@ export default function ORPlannerApp() {
       })
       .map((item) => ({ ...item, displayDateKey: dateKey }))
   ) : [];
+  const statReportReconciledGrowthCount = activeStatReportType === "reconciled"
+    ? statReportCases.filter((item) => item.reconciled && item.growth).length
+    : 0;
   const statReportGroups = statReportDateKeys.map((dateKey) => {
     const dayCases = statReportCases.filter((item) => item.displayDateKey === dateKey);
     const facilitiesForDay = Array.from(new Set(dayCases.map((item) => item.facility || "No Facility"))).sort((a, b) => a.localeCompare(b));
@@ -4811,6 +4814,13 @@ export default function ORPlannerApp() {
                       <div>
                         <h2 className="text-xl font-bold">{statReportLabels[activeStatReportType]}</h2>
                         <p className="text-sm text-slate-500">{activeStatReportType === "yearTotal" || activeStatReportType === "yearGrowth" ? `Year-to-date through ${formatLongDate(selectedWeekEnd)}` : `Week of ${formatLongDate(weekDates[0])}`}</p>
+                        {activeStatReportType === "reconciled" && (
+                          <div className="mt-3 inline-flex items-center gap-3 rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-900 ring-1 ring-emerald-100">
+                            <span className="text-[11px] font-black uppercase tracking-wide text-emerald-700">Reconciled Growth</span>
+                            <span className="text-lg font-black leading-none">{statReportReconciledGrowthCount}</span>
+                            <span className="text-xs font-bold text-emerald-700">of {statReportCases.length}</span>
+                          </div>
+                        )}
                         {ftShareStatus && <p className="mt-1 text-xs font-semibold text-blue-600">{ftShareStatus}</p>}
                       </div>
                       <div className="flex flex-wrap justify-end gap-2">
@@ -5227,7 +5237,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5n · hernia family + completed duplicate guard</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5o · reconciled growth report count</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
