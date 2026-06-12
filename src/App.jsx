@@ -2411,6 +2411,31 @@ export default function ORPlannerApp() {
     return intersection / union;
   };
 
+  const sfSpecificHerniaFamilyType = (procedure = "") => {
+    const key = normalizeSfKey(procedure);
+    if (!key) return "";
+
+    // Keep this intentionally narrow. These three are treated as the same
+    // procedure family for matching/reconciliation, but other hernias are not.
+    if (key.includes("umbilical") && (key.includes("hernia") || key === "umbilical")) return "umbilical";
+    if (key.includes("incisional") && (key.includes("hernia") || key === "incisional")) return "incisional";
+    if (key.includes("ventral") && (key.includes("hernia") || key === "ventral")) return "ventral";
+
+    return "";
+  };
+
+  const sfIsSpecificHerniaFamilyMatch = (leftProcedure = "", rightProcedure = "") => {
+    const leftType = sfSpecificHerniaFamilyType(leftProcedure);
+    const rightType = sfSpecificHerniaFamilyType(rightProcedure);
+    return Boolean(leftType && rightType);
+  };
+
+  const sfProcedureMatchScore = (leftProcedure = "", rightProcedure = "") => {
+    const baseScore = sfSimilarityScore(leftProcedure, rightProcedure);
+    if (sfIsSpecificHerniaFamilyMatch(leftProcedure, rightProcedure)) return Math.max(baseScore, 0.92);
+    return baseScore;
+  };
+
   const sfFacilityTokens = (value = "") =>
     sfTokens(value).filter((token) => !["hospital", "medical", "center", "regional", "general", "the", "of", "and"].includes(token));
 
@@ -3009,12 +3034,13 @@ export default function ORPlannerApp() {
       return { plannerCase, score: 0, status: "No Match", reasons: ["date mismatch"] };
     }
 
-    const facilityScore = sfSimilarityScore(sfCase.facility, plannerCase.facility);
+    const facilityScore = sfFacilityScore(sfCase.facility, plannerCase.facility);
     const surgeonScore = sfSurgeonScore(sfCase.surgeon, plannerCase.surgeon);
-    const procedureScore = sfSimilarityScore(sfCase.procedure, plannerCase.procedure);
+    const procedureScore = sfProcedureMatchScore(sfCase.procedure, plannerCase.procedure);
+    const herniaFamilyMatch = sfIsSpecificHerniaFamilyMatch(sfCase.procedure, plannerCase.procedure);
     const timeDiff = sfTimeDifferenceMinutes(sfCase.time, plannerCase.time);
     const hasBothTimes = parseTimeToMinutes(sfCase.time) !== null && parseTimeToMinutes(plannerCase.time) !== null;
-    const identityMatches = facilityScore >= 0.7 && surgeonScore >= 0.7 && procedureScore >= 0.5;
+    const identityMatches = facilityScore >= 0.7 && surgeonScore >= 0.7 && (procedureScore >= 0.5 || herniaFamilyMatch);
     const timeIsTight = hasBothTimes && timeDiff !== null && timeDiff <= 15;
     const timeIsReasonable = hasBothTimes && timeDiff !== null && timeDiff <= 30;
 
@@ -3040,7 +3066,8 @@ export default function ORPlannerApp() {
 
     if (facilityScore >= 0.7) reasons.push("facility");
     if (surgeonScore >= 0.7) reasons.push("surgeon");
-    if (procedureScore >= 0.5) reasons.push("procedure");
+    if (herniaFamilyMatch) reasons.push("hernia family");
+    else if (procedureScore >= 0.5) reasons.push("procedure");
 
     score += facilityScore * 20;
     score += surgeonScore * 20;
@@ -3080,6 +3107,43 @@ export default function ORPlannerApp() {
       .map((plannerCase) => sfScorePlannerMatch(sfCase, plannerCase, mode))
       .filter((match) => match.score > 0)
       .sort((a, b) => b.score - a.score);
+
+  const sfFindExistingCompletedPlannerCaseMatch = (sfCase, reservedPlannerCaseIds = new Set()) => {
+    if (!sfCase?.dateKey || !sfCase?.facility || !sfCase?.surgeon || !sfCase?.procedure) return null;
+
+    const candidates = sfFlattenPlannerCases()
+      .filter((plannerCase) => {
+        if (reservedPlannerCaseIds.has(plannerCase.id)) return false;
+        if (plannerCase.displayDateKey !== sfCase.dateKey) return false;
+
+        const facilityScore = sfFacilityScore(sfCase.facility, plannerCase.facility);
+        const surgeonScore = sfSurgeonScore(sfCase.surgeon, plannerCase.surgeon);
+        const procedureScore = sfProcedureMatchScore(sfCase.procedure, plannerCase.procedure);
+        const herniaFamilyMatch = sfIsSpecificHerniaFamilyMatch(sfCase.procedure, plannerCase.procedure);
+
+        return facilityScore >= 0.7 && surgeonScore >= 0.7 && (procedureScore >= 0.88 || herniaFamilyMatch);
+      })
+      .map((plannerCase) => {
+        const match = sfScorePlannerMatch(sfCase, plannerCase, plannerCase.fastTracking ? "reconcile" : "normal");
+        const herniaFamilyMatch = sfIsSpecificHerniaFamilyMatch(sfCase.procedure, plannerCase.procedure);
+        const reasons = Array.from(new Set([...(match.reasons || []), herniaFamilyMatch ? "hernia family" : "already exists"].filter(Boolean)));
+
+        return {
+          ...match,
+          status: "Match",
+          score: Math.max(match.score || 0, herniaFamilyMatch ? 92 : 96),
+          reasons,
+        };
+      })
+      .sort((a, b) => {
+        // Prefer exact already-reconciled duplicates first so the safest action is Ignore.
+        if (Boolean(b.plannerCase.reconciled) !== Boolean(a.plannerCase.reconciled)) return b.plannerCase.reconciled ? 1 : -1;
+        if (Boolean(b.plannerCase.fastTracking) !== Boolean(a.plannerCase.fastTracking)) return b.plannerCase.fastTracking ? 1 : -1;
+        return b.score - a.score;
+      });
+
+    return candidates[0] || null;
+  };
 
   const sfSuggestedAction = (item, screenshotType = "") => {
     const recommended = normalizeSfKey(item.recommendedAction);
@@ -3177,6 +3241,9 @@ export default function ORPlannerApp() {
       ? sfGetPlannerMatches(baseRow, "reconcile").filter((match) => !reservedPlannerCaseIds.has(match.plannerCase.id))
       : [];
     const bestLeftoverFastTrackMatch = leftoverFastTrackMatches[0];
+    const existingCompletedPlannerMatch = Boolean(isAccountHistoryImport && sfIsCompleted(baseRow))
+      ? sfFindExistingCompletedPlannerCaseMatch(baseRow, reservedPlannerCaseIds)
+      : null;
 
     let action = "review";
     let selectedPlannerCaseId = "";
@@ -3201,6 +3268,17 @@ export default function ORPlannerApp() {
         selectedPlannerCaseId = bestMatch.plannerCase.id;
       } else {
         action = "importNew";
+      }
+    } else if (existingCompletedPlannerMatch?.status === "Match") {
+      displayBestMatch = existingCompletedPlannerMatch;
+      if (existingCompletedPlannerMatch.plannerCase.reconciled) {
+        action = "ignore";
+      } else if (existingCompletedPlannerMatch.plannerCase.fastTracking) {
+        action = "markReconciled";
+        selectedPlannerCaseId = existingCompletedPlannerMatch.plannerCase.id;
+      } else {
+        action = "markReconciledOnly";
+        selectedPlannerCaseId = existingCompletedPlannerMatch.plannerCase.id;
       }
     } else if (suggestedAction === "ignore") {
       action = "ignore";
@@ -3538,8 +3616,17 @@ export default function ORPlannerApp() {
             didUpdate = true;
             if (item.action === "markReconciled" || item.action === "markReconciledOnly") reconciledCount += 1;
             if (item.action === "markFastTracking") fastTrackedCount += 1;
+            const salesforceProcedure = sfCanonicalProcedureNameForRow(item, next) || item.procedure || "";
+            const shouldUseSalesforceProcedure = Boolean(
+              salesforceProcedure &&
+              existingCase.procedure &&
+              salesforceProcedure !== existingCase.procedure &&
+              sfIsSpecificHerniaFamilyMatch(salesforceProcedure, existingCase.procedure)
+            );
+
             return {
               ...existingCase,
+              procedure: shouldUseSalesforceProcedure ? salesforceProcedure : existingCase.procedure,
               fastTracking: item.action === "markReconciledOnly" ? Boolean(existingCase.fastTracking) : true,
               reconciled: item.action === "markReconciled" || item.action === "markReconciledOnly" ? true : Boolean(existingCase.reconciled || sfIsCompleted(item)),
               notes: existingCase.notes,
@@ -5140,7 +5227,7 @@ export default function ORPlannerApp() {
               <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Salesforce Import</div>
                 <h2 className="mt-1 text-xl font-bold text-slate-900 md:text-2xl">AI screenshot extraction</h2>
-                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5m · cleaner bulk move modal</div>
+                <div className="mt-1 text-xs font-bold text-slate-400">SF Import logic v5n · hernia family + completed duplicate guard</div>
                 <p className="mt-1 max-w-2xl text-sm text-slate-600">
                   Upload a Salesforce screenshot, review the suggested actions, then apply approved rows to your OR Planner. The compact screenshot reference stays visible while you review. Click the image on desktop to enlarge it; on mobile, use the floating image button while scrolling.
                 </p>
